@@ -1,8 +1,9 @@
 {
   "version": "5",
   "specifiers": {
+    "npm:@types/node@^25.5.0": "25.5.0",
     "npm:typescript@~5.9.3": "5.9.3",
-    "npm:vite@^8.0.1": "8.0.1"
+    "npm:vite@^8.0.1": "8.0.1_@types+node@25.5.0"
   },
   "npm": {
     "@emnapi/core@1.9.1": {
@@ -119,6 +120,12 @@
       "integrity": "sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg==",
       "dependencies": [
         "tslib"
+      ]
+    },
+    "@types/node@25.5.0": {
+      "integrity": "sha512-jp2P3tQMSxWugkCUKLRPVUpGaL5MVFwF8RDuSRztfwgN1wmqJeMSbKlnEtQqU8UrhTmzEmZdu2I6v2dpp7XIxw==",
+      "dependencies": [
+        "undici-types"
       ]
     },
     "detect-libc@2.1.2": {
@@ -272,9 +279,13 @@
       "integrity": "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==",
       "bin": true
     },
-    "vite@8.0.1": {
+    "undici-types@7.18.2": {
+      "integrity": "sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w=="
+    },
+    "vite@8.0.1_@types+node@25.5.0": {
       "integrity": "sha512-wt+Z2qIhfFt85uiyRt5LPU4oVEJBXj8hZNWKeqFG4gRG/0RaRGJ7njQCwzFVjO+v4+Ipmf5CY7VdmZRAYYBPHw==",
       "dependencies": [
+        "@types/node",
         "lightningcss",
         "picomatch",
         "postcss",
@@ -284,12 +295,16 @@
       "optionalDependencies": [
         "fsevents"
       ],
+      "optionalPeers": [
+        "@types/node"
+      ],
       "bin": true
     }
   },
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:@types/node@^25.5.0",
         "npm:typescript@~5.9.3",
         "npm:vite@^8.0.1"
       ]
