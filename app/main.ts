@@ -1,8 +1,7 @@
-const app = document.querySelector<HTMLDivElement>("#app");
+import { observeCanvasResize } from "./utils";
+import shaders from './shaders.wgsl?raw';
 
-if (!app) {
-    throw new Error("App container not found");
-}
+const canvas = document.querySelector<HTMLCanvasElement>("canvas")!;
 
 if (!navigator.gpu) {
     throw new Error("WebGPU not available");
@@ -18,14 +17,6 @@ if (!adapter) {
 
 const device = await adapter.requestDevice();
 const format = navigator.gpu.getPreferredCanvasFormat();
-
-const canvas = document.createElement("canvas");
-canvas.width = window.innerWidth * window.devicePixelRatio;
-canvas.height = window.innerHeight * window.devicePixelRatio;
-canvas.style.width = "100%";
-canvas.style.height = "100%";
-app.append(canvas);
-
 const context = canvas.getContext("webgpu");
 
 if (!context) {
@@ -35,10 +26,9 @@ if (!context) {
 context.configure({
     device,
     format,
-    alphaMode: "opaque",
 });
 
-import shaders from './shaders.wgsl?raw';
+observeCanvasResize(canvas, device);
 const shader = device.createShaderModule({ code: shaders });
 
 const depthFormat: GPUTextureFormat = 'depth24plus';
