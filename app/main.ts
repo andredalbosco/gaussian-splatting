@@ -115,10 +115,20 @@ const gaussColors = [
     [0.0, 0.0, 1.0],
 ];
 
-const eye = vec3.create(0, 0, 1);
 const target = vec3.create(0, 0, 0);
 const up = vec3.create(0, 1, 0);
-const viewMatrix = mat4.lookAt(eye, target, up);
+const orbitRadius = 1;
+let orbitAngle = 0;
+
+function updateViewMatrix() {
+    const eye = vec3.create(
+        Math.sin(orbitAngle) * orbitRadius,
+        0,
+        Math.cos(orbitAngle) * orbitRadius,
+    );
+    const viewMatrix = mat4.lookAt(eye, target, up);
+    globalsData.set({ viewMatrix });
+}
 
 function updateProjectionMatrix() {
     const fovy = 60.0 * Math.PI / 180;
@@ -135,10 +145,23 @@ function handleResize() {
 }
 
 globalsData.set({
-    viewMatrix,
+    viewMatrix: mat4.identity(),
 });
 observeCanvasResize(canvas, device, handleResize);
 handleResize();
+updateViewMatrix();
+
+window.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowLeft') {
+        orbitAngle -= 0.1;
+        updateViewMatrix();
+    }
+
+    if (event.key === 'ArrowRight') {
+        orbitAngle += 0.1;
+        updateViewMatrix();
+    }
+});
 
 device.queue.writeBuffer(globalsBuffer, 0, globalsData.arrayBuffer);
 
