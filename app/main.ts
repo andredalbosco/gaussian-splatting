@@ -16,8 +16,8 @@ if (!adapter) {
 }
 
 const device = await adapter.requestDevice();
-const format = navigator.gpu.getPreferredCanvasFormat();
-const context = canvas.getContext("webgpu");
+const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
+const context = canvas.getContext("webgpu")!;
 
 if (!context) {
     throw new Error("WebGPU canvas context not available");
@@ -25,24 +25,59 @@ if (!context) {
 
 context.configure({
     device,
-    format,
-});
+    format: canvasFormat,
+})!;
 
 observeCanvasResize(canvas, device);
 const shader = device.createShaderModule({ code: shaders });
 
 const depthFormat: GPUTextureFormat = 'depth24plus';
+const depthTexture = device.createTexture({
+    format: depthFormat,
+    size: {width: canvas.width, height: canvas.height},
+    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+})
 
-device.createRenderPipeline({
+const pipeline = device.createRenderPipeline({
     layout: 'auto',
     vertex: {
         module: shader,
     },
     depthStencil: {
         format: depthFormat,
+        depthWriteEnabled: true,
+        depthCompare: 'less-equal',
     },
     fragment: {
         module: shader,
-        targets: []
+        targets: [{ format: canvasFormat }],
     },
 })
+
+function renderFrame() {
+    const encoder = device.createCommandEncoder();
+
+    const pass = encoder.beginRenderPass({
+        colorAttachments: [{
+            loadOp: 'clear',
+            storeOp: 'store',
+            clearValue: [0, 0, 0, 1],
+            view: context.getCurrentTexture().createView(),
+        }],
+        depthStencilAttachment: {
+            view: depthTexture.createView(),
+            depthLoadOp: 'clear',
+            depthStoreOp: 'store',
+            depthClearValue: 1.0,
+        }
+    });
+    pass.setPipeline(pipeline);
+    pass.draw(3, 1);
+    pass.end();
+
+    device.queue.submit([encoder.finish()]);
+
+    requestAnimationFrame(renderFrame);
+}
+
+requestAnimationFrame(renderFrame);
