@@ -5,6 +5,7 @@
 export function observeCanvasResize(
     canvas: HTMLCanvasElement,
     device: GPUDevice,
+    onResize: () => void,
 ) {
     const maxTextureDimension2D = device.limits.maxTextureDimension2D;
     const resizeObserver = new ResizeObserver((entries) => {
@@ -16,6 +17,7 @@ export function observeCanvasResize(
 
             canvas.width = Math.max(1, Math.min(width, maxTextureDimension2D));
             canvas.height = Math.max(1, Math.min(height, maxTextureDimension2D));
+            onResize();
         }
     });
 

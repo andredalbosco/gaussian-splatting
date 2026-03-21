@@ -28,15 +28,21 @@ context.configure({
     format: canvasFormat,
 })!;
 
-observeCanvasResize(canvas, device);
 const shader = device.createShaderModule({ code: shaders });
 
 const depthFormat: GPUTextureFormat = 'depth24plus';
-const depthTexture = device.createTexture({
-    format: depthFormat,
-    size: {width: canvas.width, height: canvas.height},
-    usage: GPUTextureUsage.RENDER_ATTACHMENT,
-})
+let depthTexture: GPUTexture;
+
+function createDepthTexture() {
+    depthTexture = device.createTexture({
+        format: depthFormat,
+        size: {width: canvas.width, height: canvas.height},
+        usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+}
+
+observeCanvasResize(canvas, device, createDepthTexture);
+createDepthTexture();
 
 const pipeline = device.createRenderPipeline({
     layout: 'auto',
