@@ -1,3 +1,10 @@
+@group(0) @binding(0) var<uniform> globals: Globals;
+
+struct Globals {
+    viewMatrix: mat4x4f,
+    projectionMatrix: mat4x4f,
+};
+
 const vertices = array(
     vec2f(-0.5, -0.5),
     vec2f(0.5, -0.5),
@@ -15,7 +22,8 @@ struct VertexOutput {
 @vertex
 fn vertexMain(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    output.position = vec4f(vertices[input.vertexIndex], 0, 1);
+    var worldPos = vec4f(vertices[input.vertexIndex], 0, 1);
+    output.position = globals.projectionMatrix * globals.viewMatrix * worldPos;
     return output;
 }
 

@@ -10,10 +10,11 @@
     "mirror:webgpu-fundamentals": "node misc/mirror-webgpu-fundamentals.mjs"
   },
   "devDependencies": {
-    "wgpu-matrix": "^3.4.2",
-    "@webgpu/types": "^0.1.69",
     "@types/node": "^25.5.0",
+    "@webgpu/types": "^0.1.69",
     "typescript": "~5.9.3",
-    "vite": "^8.0.1"
+    "vite": "^8.0.1",
+    "webgpu-utils": "^2.0.3",
+    "wgpu-matrix": "^3.4.2"
   }
 }
