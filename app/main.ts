@@ -60,6 +60,27 @@ const pipeline = device.createRenderPipeline({
     },
 })
 
+const gaussMeans = [
+    [0.0, 0.0, 0.01],
+    [0.0, 0.0,  0.02],
+    [0.0, 0.0,  0.04]
+];
+
+const gaussCov = [
+    [[0.2, 0.0, 0.0],
+    [0.0, 0.2, 0.0],
+    [0.0, 0.0, 0.2]],
+
+    [[1.0, 0.0, 0.0],
+    [0.0, 0.05, 0.0],
+    [0.0, 0.0, 0.1]],
+
+    [[0.1, 0.0, 0.0],
+    [0.0, 0.1, 0.0],
+    [0.0, 0.0, 0.1]]
+]
+
+
 function renderFrame() {
     const encoder = device.createCommandEncoder();
 
