@@ -1,3 +1,4 @@
+import { mat3, vec3 } from 'wgpu-matrix';
 import { observeCanvasResize } from "./utils";
 import shaders from './shaders.wgsl?raw';
 
@@ -61,25 +62,36 @@ const pipeline = device.createRenderPipeline({
 })
 
 const gaussMeans = [
-    [0.0, 0.0, 0.01],
-    [0.0, 0.0,  0.02],
-    [0.0, 0.0,  0.04]
+    vec3.create(0.0, 0.0, 0.01),
+    vec3.create(0.0, 0.0, 0.02),
+    vec3.create(0.0, 0.0, 0.04),
 ];
 
 const gaussCov = [
-    [[0.2, 0.0, 0.0],
-    [0.0, 0.2, 0.0],
-    [0.0, 0.0, 0.2]],
+    mat3.create(
+        0.2, 0.0, 0.0,
+        0.0, 0.2, 0.0,
+        0.0, 0.0, 0.2,
+    ),
+    mat3.create(
+        1.0, 0.0, 0.0,
+        0.0, 0.05, 0.0,
+        0.0, 0.0, 0.1,
+    ),
+    mat3.create(
+        0.1, 0.0, 0.0,
+        0.0, 0.1, 0.0,
+        0.0, 0.0, 0.1,
+    ),
+];
 
-    [[1.0, 0.0, 0.0],
-    [0.0, 0.05, 0.0],
-    [0.0, 0.0, 0.1]],
+const gaussOpacities = [[0.7, 0.7, 0.7]];
 
-    [[0.1, 0.0, 0.0],
-    [0.0, 0.1, 0.0],
-    [0.0, 0.0, 0.1]]
-]
-
+const gaussColors = [
+    [1.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 0.0, 1.0],
+];
 
 function renderFrame() {
     const encoder = device.createCommandEncoder();
