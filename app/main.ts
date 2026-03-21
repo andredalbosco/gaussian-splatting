@@ -1,5 +1,5 @@
 import { mat3, mat4, vec3 } from 'wgpu-matrix';
-import { makeShaderDataDefinitions, makeStructuredView } from 'webgpu-utils';
+import { getSizeAndAlignmentOfUnsizedArrayElement, makeShaderDataDefinitions, makeStructuredView } from 'webgpu-utils';
 import { observeCanvasResize } from "./utils";
 import shaderCode from './shaders.wgsl?raw';
 
@@ -54,16 +54,12 @@ const globalsBindGroupLayout = device.createBindGroupLayout({
         binding: 0,
         visibility: GPUShaderStage.VERTEX,
         buffer: {type: 'uniform'},
+    }, {
+        binding: 1,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: {type: 'read-only-storage'},
     }]
 });
-const globalsBindGroup = device.createBindGroup({
-    layout: globalsBindGroupLayout,
-    entries: [{
-        binding: 0,
-        resource: globalsBuffer,
-    }]
-});
-
 const pipelineLayout = device.createPipelineLayout({
     bindGroupLayouts: [globalsBindGroupLayout],
 })
@@ -88,7 +84,6 @@ const gaussMeans = [
     vec3.create(0.0, 0.0, 0.02),
     vec3.create(0.0, 0.0, 0.04),
 ];
-
 const gaussCov = [
     mat3.create(
         0.2, 0.0, 0.0,
@@ -106,14 +101,39 @@ const gaussCov = [
         0.0, 0.0, 0.1,
     ),
 ];
-
 const gaussOpacities = [0.7, 0.7, 0.7];
-
 const gaussColors = [
     [1.0, 0.0, 0.0],
     [0.0, 1.0, 0.0],
     [0.0, 0.0, 1.0],
 ];
+
+const { size: gaussianSize } = getSizeAndAlignmentOfUnsizedArrayElement(shaderDefs.storages.gaussians);
+const gaussiansData = makeStructuredView(
+    shaderDefs.storages.gaussians,
+    new ArrayBuffer(gaussMeans.length * gaussianSize),
+);
+gaussiansData.set(gaussMeans.map((mean, index) => ({
+    mean,
+    cov: gaussCov[index],
+    color: gaussColors[index],
+    opacity: gaussOpacities[index],
+})));
+const gaussiansBuffer = device.createBuffer({
+    size: gaussiansData.arrayBuffer.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
+
+const globalsBindGroup = device.createBindGroup({
+    layout: globalsBindGroupLayout,
+    entries: [{
+        binding: 0,
+        resource: globalsBuffer,
+    }, {
+        binding: 1,
+        resource: { buffer: gaussiansBuffer },
+    }]
+});
 
 const target = vec3.create(0, 0, 0);
 const up = vec3.create(0, 1, 0);
@@ -164,6 +184,9 @@ window.addEventListener('keydown', (event) => {
 });
 
 device.queue.writeBuffer(globalsBuffer, 0, globalsData.arrayBuffer);
+device.queue.writeBuffer(gaussiansBuffer, 0, gaussiansData.arrayBuffer);
+
+const numGaussians = gaussMeans.length;
 
 function renderFrame() {
     device.queue.writeBuffer(globalsBuffer, 0, globalsData.arrayBuffer);
@@ -186,7 +209,7 @@ function renderFrame() {
     });
     pass.setPipeline(pipeline);
     pass.setBindGroup(0, globalsBindGroup);
-    pass.draw(3, 1);
+    pass.draw(6, numGaussians);
     pass.end();
 
     device.queue.submit([encoder.finish()]);
