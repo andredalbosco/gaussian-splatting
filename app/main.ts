@@ -1,4 +1,4 @@
-import { mat3, mat4, vec3 } from 'wgpu-matrix';
+import { mat3, mat4, vec3, type Mat3, type Mat3Arg, type Vec3Arg } from 'wgpu-matrix';
 import { getSizeAndAlignmentOfUnsizedArrayElement, makeShaderDataDefinitions, makeStructuredView } from 'webgpu-utils';
 import { observeCanvasResize } from "./utils";
 import shaderCode from './shaders.wgsl?raw';
@@ -108,19 +108,50 @@ const gaussColors = [
     [0.0, 0.0, 1.0],
 ];
 
-const { size: gaussianSize } = getSizeAndAlignmentOfUnsizedArrayElement(shaderDefs.storages.gaussians);
-const gaussiansData = makeStructuredView(
-    shaderDefs.storages.gaussians,
-    new ArrayBuffer(gaussMeans.length * gaussianSize),
+const { size: gaussian3dSize } = getSizeAndAlignmentOfUnsizedArrayElement(shaderDefs.storages.gaussians3d);
+const gaussians3dData = makeStructuredView(
+    shaderDefs.storages.gaussians3d,
+    new ArrayBuffer(gaussMeans.length * gaussian3dSize),
 );
-gaussiansData.set(gaussMeans.map((mean, index) => ({
+gaussians3dData.set(gaussMeans.map((mean, index) => ({
     mean,
     cov: gaussCov[index],
     color: gaussColors[index],
     opacity: gaussOpacities[index],
 })));
-const gaussiansBuffer = device.createBuffer({
-    size: gaussiansData.arrayBuffer.byteLength,
+const gaussians3dBuffer = device.createBuffer({
+    size: gaussians3dData.arrayBuffer.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
+
+function splatGaussian(mean3d: Vec3Arg, cov3d: Mat3Arg) {
+    function getJacobian(u: Vec3Arg): Mat3 {
+        const l = u.length;
+        return mat3.transpose(mat3.create(
+            1 / u[2], 0, -u[0] / (u[2] * u[2]),
+            0, 1 / u[2], -u[1] / (u[2] * u[2]),
+            u[0] / l, u[1] / l, u[2] / l,
+        ));
+    }
+    const J = getJacobian(mean3d);
+    // const R = globalsData.views.
+}
+
+console.log(globalsData.views.projectionMatrix)
+
+const { size: gaussian2dSize } = getSizeAndAlignmentOfUnsizedArrayElement(shaderDefs.storages.gaussians2d);
+const gaussians2dData = makeStructuredView(
+    shaderDefs.storages.gaussians2d,
+    new ArrayBuffer(gaussMeans.length * gaussian2dSize),
+);
+gaussians2dData.set(gaussMeans.map((mean, index) => ({
+    mean: mean.slice(0, 2),
+    cov: gaussCov[index].slice(0, 4),
+    color: gaussColors[index],
+    opacity: gaussOpacities[index],
+})));
+const gaussians2dBuffer = device.createBuffer({
+    size: gaussians2dData.arrayBuffer.byteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 });
 
@@ -131,7 +162,7 @@ const globalsBindGroup = device.createBindGroup({
         resource: globalsBuffer,
     }, {
         binding: 1,
-        resource: { buffer: gaussiansBuffer },
+        resource: { buffer: gaussians3dBuffer },
     }]
 });
 
@@ -184,9 +215,14 @@ window.addEventListener('keydown', (event) => {
 });
 
 device.queue.writeBuffer(globalsBuffer, 0, globalsData.arrayBuffer);
-device.queue.writeBuffer(gaussiansBuffer, 0, gaussiansData.arrayBuffer);
+device.queue.writeBuffer(gaussians3dBuffer, 0, gaussians3dData.arrayBuffer);
+device.queue.writeBuffer(gaussians2dBuffer, 0, gaussians2dData.arrayBuffer);
 
 const numGaussians = gaussMeans.length;
+
+function getJacobian() {
+
+}
 
 function renderFrame() {
     device.queue.writeBuffer(globalsBuffer, 0, globalsData.arrayBuffer);
