@@ -62,8 +62,8 @@ fn getJacobianMatrix(mean3d: vec3f) -> mat3x3f {
         vec3f(0, 1 / u.z, -u.y / (u.z * u.z)),
         u / l,
     ));
-    // J[0] *= globals.projectionMatrix[0][0];
-    // J[1] *= globals.projectionMatrix[1][1];
+    J[0] *= globals.projectionMatrix[0][0];
+    J[1] *= globals.projectionMatrix[1][1];
     return J;
 }
 
@@ -136,6 +136,5 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
     let cov2dInv = mat2x2f(input.cov2dInv.xy, input.cov2dInv.zw);
     let x = input.clipPos.xy - input.mean2d;
     let alpha = 0.7 * exp(-0.5 * dot(x, cov2dInv * x));
-    // let alpha = 1.0;
     return vec4f(input.color * alpha, alpha);
 }

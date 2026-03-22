@@ -114,8 +114,8 @@ const gaussians3dData = makeStructuredView(
     new ArrayBuffer(gaussMeans.length * gaussian3dSize),
 );
 gaussians3dData.set(gaussMeans.map((mean, index) => ({
-    mean,
-    cov: gaussCov[index],
+    mean3d: mean,
+    cov3d: gaussCov[index],
     color: gaussColors[index],
     opacity: gaussOpacities[index],
 })));
@@ -145,8 +145,8 @@ const gaussians2dData = makeStructuredView(
     new ArrayBuffer(gaussMeans.length * gaussian2dSize),
 );
 gaussians2dData.set(gaussMeans.map((mean, index) => ({
-    mean: mean.slice(0, 2),
-    cov: gaussCov[index].slice(0, 4),
+    mean2d: mean.slice(0, 2),
+    cov2d: gaussCov[index].slice(0, 4),
     color: gaussColors[index],
     opacity: gaussOpacities[index],
 })));
