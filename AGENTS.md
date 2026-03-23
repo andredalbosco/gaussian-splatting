@@ -10,6 +10,7 @@ Keep the code as lean as possible.
 - Always strive toward minimality, and take any clean opportunity to eliminate existing code.
 - Adhere to the existing style of the file or surrounding code instead of introducing a new one.
 - Avoid unnecessary abstractions, helper functions, and comments.
+- Avoid modifying code not directly/strictly related to your task.
 
 ## References
 
