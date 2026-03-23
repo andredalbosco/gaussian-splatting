@@ -1,9 +1,13 @@
-import { mat3, mat4, vec3, type Mat3, type Mat3Arg, type Vec3Arg } from 'wgpu-matrix';
+import Stats from 'stats.js';
+import { mat3, mat4, vec3 } from 'wgpu-matrix';
 import { getSizeAndAlignmentOfUnsizedArrayElement, makeShaderDataDefinitions, makeStructuredView } from 'webgpu-utils';
 import { observeCanvasResize } from "./utils";
 import shaderCode from './shaders.wgsl?raw';
 
 const canvas = document.querySelector<HTMLCanvasElement>("canvas")!;
+const stats = new Stats();
+stats.showPanel(0);
+document.body.appendChild(stats.dom);
 
 if (!navigator.gpu) {
     throw new Error("WebGPU not available");
@@ -28,6 +32,7 @@ if (!context) {
 context.configure({
     device,
     format: canvasFormat,
+    alphaMode: 'premultiplied',
 })!;
 
 const shaderModule = device.createShaderModule({ code: shaderCode });
@@ -58,6 +63,14 @@ const globalsBindGroupLayout = device.createBindGroupLayout({
         binding: 1,
         visibility: GPUShaderStage.VERTEX,
         buffer: {type: 'read-only-storage'},
+    }, {
+        binding: 2,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: {type: 'read-only-storage'},
+    }, {
+        binding: 3,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: {type: 'read-only-storage'},
     }]
 });
 const pipelineLayout = device.createPipelineLayout({
@@ -75,7 +88,19 @@ const pipeline = device.createRenderPipeline({
     },
     fragment: {
         module: shaderModule,
-        targets: [{ format: canvasFormat }],
+        targets: [{
+            format: canvasFormat,
+            blend: {
+                color: {
+                    srcFactor: 'one',
+                    dstFactor: 'one-minus-src-alpha',
+                },
+                alpha: {
+                    srcFactor: 'one',
+                    dstFactor: 'one-minus-src-alpha'
+                }
+            },
+        }],
     },
 })
 
@@ -124,21 +149,6 @@ const gaussians3dBuffer = device.createBuffer({
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 });
 
-function splatGaussian(mean3d: Vec3Arg, cov3d: Mat3Arg) {
-    function getJacobian(u: Vec3Arg): Mat3 {
-        const l = u.length;
-        return mat3.transpose(mat3.create(
-            1 / u[2], 0, -u[0] / (u[2] * u[2]),
-            0, 1 / u[2], -u[1] / (u[2] * u[2]),
-            u[0] / l, u[1] / l, u[2] / l,
-        ));
-    }
-    const J = getJacobian(mean3d);
-    // const R = globalsData.views.
-}
-
-console.log(globalsData.views.projectionMatrix)
-
 const { size: gaussian2dSize } = getSizeAndAlignmentOfUnsizedArrayElement(shaderDefs.storages.gaussians2d);
 const gaussians2dData = makeStructuredView(
     shaderDefs.storages.gaussians2d,
@@ -154,6 +164,16 @@ const gaussians2dBuffer = device.createBuffer({
     size: gaussians2dData.arrayBuffer.byteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 });
+const { size: gaussianIndexSize } = getSizeAndAlignmentOfUnsizedArrayElement(shaderDefs.storages.gaussianIndex);
+const gaussianIndexData = makeStructuredView(
+    shaderDefs.storages.gaussianIndex,
+    new ArrayBuffer(gaussMeans.length * gaussianIndexSize),
+);
+gaussianIndexData.views.set(Array.from({ length: gaussMeans.length }, (_, index) => index));
+const gaussianIndexBuffer = device.createBuffer({
+    size: gaussianIndexData.arrayBuffer.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
 
 const globalsBindGroup = device.createBindGroup({
     layout: globalsBindGroupLayout,
@@ -163,6 +183,12 @@ const globalsBindGroup = device.createBindGroup({
     }, {
         binding: 1,
         resource: { buffer: gaussians3dBuffer },
+    }, {
+        binding: 2,
+        resource: { buffer: gaussians2dBuffer },
+    }, {
+        binding: 3,
+        resource: { buffer: gaussianIndexBuffer },
     }]
 });
 
@@ -217,14 +243,20 @@ window.addEventListener('keydown', (event) => {
 device.queue.writeBuffer(globalsBuffer, 0, globalsData.arrayBuffer);
 device.queue.writeBuffer(gaussians3dBuffer, 0, gaussians3dData.arrayBuffer);
 device.queue.writeBuffer(gaussians2dBuffer, 0, gaussians2dData.arrayBuffer);
+device.queue.writeBuffer(gaussianIndexBuffer, 0, gaussianIndexData.arrayBuffer);
 
 const numGaussians = gaussMeans.length;
 
-function getJacobian() {
-
+function orderGaussians() {
+    const M = mat4.mul(globalsData.views.projectionMatrix, globalsData.views.viewMatrix);
+    const depths = gaussMeans.map(mean3d => vec3.transformMat4(mean3d, M)[2]);
+    gaussianIndexData.views.sort((i: number, j: number) => depths[j] - depths[i]);
+    device.queue.writeBuffer(gaussianIndexBuffer, 0, gaussianIndexData.arrayBuffer);
 }
 
 function renderFrame() {
+    stats.begin();
+    orderGaussians();
     device.queue.writeBuffer(globalsBuffer, 0, globalsData.arrayBuffer);
 
     const encoder = device.createCommandEncoder();
@@ -249,6 +281,7 @@ function renderFrame() {
     pass.end();
 
     device.queue.submit([encoder.finish()]);
+    stats.end();
 
     requestAnimationFrame(renderFrame);
 }

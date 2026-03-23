@@ -16,5 +16,9 @@
     "vite": "^8.0.1",
     "webgpu-utils": "^2.0.3",
     "wgpu-matrix": "^3.4.2"
+  },
+  "dependencies": {
+    "@types/stats.js": "^0.17.4",
+    "stats.js": "^0.17.0"
   }
 }

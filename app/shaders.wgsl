@@ -1,6 +1,7 @@
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var<storage, read> gaussians3d: array<Gaussian3D>;
 @group(0) @binding(2) var<storage, read> gaussians2d: array<Gaussian2D>;
+@group(0) @binding(3) var<storage, read> gaussianIndex: array<u32>;
 
 struct Globals {
     viewMatrix: mat4x4f,
@@ -96,7 +97,9 @@ fn eigenBasis2x2(cov: mat2x2f) -> mat2x2f {
 fn vertexMain(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
 
-    let gaussian = gaussians3d[input.instanceIndex];
+    // let gaussian = gaussians3d[input.instanceIndex];
+    // let gaussian = gaussians3d[ % 3];
+    let gaussian = gaussians3d[gaussianIndex[input.instanceIndex]];
 
     let R = getRotationMatrix(globals.viewMatrix);
     var J = getJacobianMatrix(gaussian.mean3d);
