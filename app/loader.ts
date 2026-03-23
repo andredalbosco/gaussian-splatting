@@ -3,6 +3,8 @@
  */
 
 import {
+    MemoryReadFileSystem,
+    WebPCodec,
     getInputFormat,
     readFile,
     sortMortonOrder,
@@ -12,6 +14,34 @@ import {
 } from '@playcanvas/splat-transform';
 import type { ColumnType, Options, ReadFileSystem } from '@playcanvas/splat-transform';
 import { GSplatData } from 'playcanvas';
+import webpWasmUrl from '@playcanvas/splat-transform/lib/webp.wasm?url';
+
+const SCENE_FILES = [
+    'meta.json',
+    'means_l.webp',
+    'means_u.webp',
+    'quats.webp',
+    'scales.webp',
+    'sh0.webp',
+    'shN_centroids.webp',
+    'shN_labels.webp'
+] as const;
+const sceneAssets = Object.entries(import.meta.glob<string>('../assets/*/*', {
+    eager: true,
+    query: '?url',
+    import: 'default'
+})).reduce((scenes, [path, url]) => {
+    const [, scene, file] = path.match(/\.\.\/assets\/([^/]+)\/([^/]+)$/)!;
+    (scenes[scene] ??= {})[file] = url;
+    return scenes;
+}, {} as Record<string, Record<string, string>>);
+
+type Scene = {
+    means: Float32Array,
+    count: number,
+    center: [number, number, number],
+    radius: number,
+};
 
 /**
  * Default options for readFile.
@@ -145,7 +175,59 @@ const validateGSplatData = (gsplatData: GSplatData): void => {
     }
 };
 
+const rotatePoint = (x: number, y: number, z: number): [number, number, number] => [x, -y, -z];
+
+const loadScene = async (scene: string): Promise<Scene> => {
+    WebPCodec.wasmUrl = webpWasmUrl;
+
+    const fileSystem = new MemoryReadFileSystem();
+    await Promise.all(SCENE_FILES.map(async (name) => {
+        const url = sceneAssets[scene][name];
+        fileSystem.set(name, new Uint8Array(await (await fetch(url)).arrayBuffer()));
+    }));
+
+    const gsplatData = await loadGSplatData('meta.json', fileSystem);
+    const x = gsplatData.getProp('x') as Float32Array;
+    const y = gsplatData.getProp('y') as Float32Array;
+    const z = gsplatData.getProp('z') as Float32Array;
+    const means = new Float32Array(gsplatData.numSplats * 3);
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let maxZ = -Infinity;
+
+    for (let i = 0; i < gsplatData.numSplats; i++) {
+        const [px, py, pz] = rotatePoint(x[i], y[i], z[i]);
+        const offset = i * 3;
+        means[offset + 0] = px;
+        means[offset + 1] = py;
+        means[offset + 2] = pz;
+        minX = Math.min(minX, px);
+        minY = Math.min(minY, py);
+        minZ = Math.min(minZ, pz);
+        maxX = Math.max(maxX, px);
+        maxY = Math.max(maxY, py);
+        maxZ = Math.max(maxZ, pz);
+    }
+
+    return {
+        means,
+        count: gsplatData.numSplats,
+        center: [
+            0.5 * (minX + maxX),
+            0.5 * (minY + maxY),
+            0.5 * (minZ + maxZ),
+        ],
+        radius: 0.5 * Math.max(maxX - minX, maxY - minY, maxZ - minZ),
+    };
+};
+
 export {
+    loadScene,
     loadGSplatData,
+    type Scene,
     validateGSplatData
 };
