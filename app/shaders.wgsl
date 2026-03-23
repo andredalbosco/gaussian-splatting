@@ -40,6 +40,7 @@ struct VertexOutput {
     @location(2) cov2dInv: vec4f,
     @location(3) color: vec3f,
     @location(4) opacity: f32,
+    @location(5) xy: vec2f,
 }
 
 const quadVertices = array(
@@ -130,7 +131,9 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
 
     let cov2dBasis = eigenBasis2x2(cov2d);
     // output.position = vec4f(quadVertices[input.vertexIndex], 0, 1);
-    output.position = vec4f(meanClip.xy + 1 * cov2dBasis * quadVertices[input.vertexIndex], meanClip.z, 1);
+    const kSupport = 3.0;
+    output.position = vec4f(meanClip.xy + kSupport * cov2dBasis * quadVertices[input.vertexIndex], meanClip.z, 1);
+    output.xy = kSupport * quadVertices[input.vertexIndex];
 
     output.color = gaussian.color;
     output.clipPos = output.position.xyz / output.position.w;
@@ -143,6 +146,7 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
 fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
     let cov2dInv = mat2x2f(input.cov2dInv.xy, input.cov2dInv.zw);
     let x = input.clipPos.xy - input.mean2d;
-    let alpha = input.opacity * exp(-0.5 * dot(x, cov2dInv * x));
+    // let alpha = input.opacity * exp(-0.5 * dot(x, cov2dInv * x));
+    let alpha = input.opacity * exp(-0.5 * dot(input.xy, input.xy));
     return vec4f(input.color * alpha, alpha);
 }
