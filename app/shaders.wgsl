@@ -1,7 +1,6 @@
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var<storage, read> gaussians3d: array<Gaussian3D>;
-@group(0) @binding(2) var<storage, read> gaussians2d: array<Gaussian2D>;
-@group(0) @binding(3) var<storage, read> gaussianIndex: array<u32>;
+@group(0) @binding(2) var<storage, read> gaussianIndex: array<u32>;
 
 struct Globals {
     viewMatrix: mat4x4f,
@@ -64,8 +63,8 @@ fn getJacobianMatrix(mean3d: vec3f) -> mat3x3f {
         vec3f(0, 1 / u.z, -u.y / (u.z * u.z)),
         u / l,
     ));
-    J[0] *= globals.projectionMatrix[0][0];
-    J[1] *= globals.projectionMatrix[1][1];
+    // J[0] *= globals.projectionMatrix[0][0];
+    // J[1] *= globals.projectionMatrix[1][1];
     return J;
 }
 
@@ -120,6 +119,11 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
 
     let R = getRotationMatrix(globals.viewMatrix);
     var J = getJacobianMatrix(gaussian.mean3d);
+    // var J = mat3x3f(
+    //     1, 0, 0,
+    //     0, 1, 0,
+    //     0, 0, 1,
+    // );
 
     var meanClip = globals.projectionMatrix * globals.viewMatrix * vec4f(gaussian.mean3d, 1);
     meanClip = meanClip.xyzw / meanClip.w;
@@ -130,7 +134,6 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
     output.cov2dInv = vec4f(cov2dInv[0].xy, cov2dInv[1].xy);
 
     let cov2dBasis = eigenBasis2x2(cov2d);
-    // output.position = vec4f(quadVertices[input.vertexIndex], 0, 1);
     const kSupport = 3.0;
     output.position = vec4f(meanClip.xy + kSupport * cov2dBasis * quadVertices[input.vertexIndex], meanClip.z, 1);
     output.xy = kSupport * quadVertices[input.vertexIndex];
@@ -144,9 +147,6 @@ fn vertexMain(input: VertexInput) -> VertexOutput {
 
 @fragment
 fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
-    let cov2dInv = mat2x2f(input.cov2dInv.xy, input.cov2dInv.zw);
-    let x = input.clipPos.xy - input.mean2d;
-    // let alpha = input.opacity * exp(-0.5 * dot(x, cov2dInv * x));
     let alpha = input.opacity * exp(-0.5 * dot(input.xy, input.xy));
     return vec4f(input.color * alpha, alpha);
 }

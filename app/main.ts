@@ -73,10 +73,6 @@ const globalsBindGroupLayout = device.createBindGroupLayout({
         binding: 2,
         visibility: GPUShaderStage.VERTEX,
         buffer: { type: 'read-only-storage' },
-    }, {
-        binding: 3,
-        visibility: GPUShaderStage.VERTEX,
-        buffer: { type: 'read-only-storage' },
     }],
 });
 const pipeline = device.createRenderPipeline({
@@ -137,12 +133,6 @@ const gaussians3dBuffer = device.createBuffer({
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 });
 
-const { size: gaussian2dSize } = getSizeAndAlignmentOfUnsizedArrayElement(shaderDefs.storages.gaussians2d);
-const gaussians2dBuffer = device.createBuffer({
-    size: gaussian2dSize,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-});
-
 const gaussianIndexData = new Uint32Array(scene.count);
 for (let i = 0; i < gaussianIndexData.length; i++) {
     gaussianIndexData[i] = i;
@@ -163,9 +153,6 @@ const globalsBindGroup = device.createBindGroup({
         resource: { buffer: gaussians3dBuffer },
     }, {
         binding: 2,
-        resource: { buffer: gaussians2dBuffer },
-    }, {
-        binding: 3,
         resource: { buffer: gaussianIndexBuffer },
     }],
 });
