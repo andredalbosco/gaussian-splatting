@@ -105,9 +105,9 @@ const pipeline = device.createRenderPipeline({
 })
 
 const gaussMeans = [
-    vec3.create(0.0, 0.0, 0.01),
-    vec3.create(0.0, 0.0, 0.02),
-    vec3.create(0.0, 0.0, 0.04),
+    vec3.create(0.0, 0.0, 1),
+    vec3.create(0.0, 0.0, 2),
+    vec3.create(0.0, 0.0, 4),
 ];
 const gaussCov = [
     mat3.create(
@@ -194,7 +194,7 @@ const globalsBindGroup = device.createBindGroup({
 
 const target = vec3.create(0, 0, 0);
 const up = vec3.create(0, 1, 0);
-const orbitRadius = 1;
+const orbitRadius = 10;
 let orbitAngle = 0;
 
 function updateViewMatrix() {
