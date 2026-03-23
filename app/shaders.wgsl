@@ -43,12 +43,12 @@ struct VertexOutput {
 }
 
 const quadVertices = array(
-    vec3f(-1, -1, 0),
-    vec3f(1, -1, 0),
-    vec3f(1, 1, 0),
-    vec3f(-1, -1, 0),
-    vec3f(1, 1, 0),
-    vec3f(-1, 1, 0),
+    vec2f(-1, -1),
+    vec2f(1, -1),
+    vec2f(1, 1),
+    vec2f(-1, -1),
+    vec2f(1, 1),
+    vec2f(-1, 1),
 );
 
 fn getRotationMatrix(M: mat4x4f) -> mat3x3f {
@@ -93,35 +93,6 @@ fn eigenBasis2x2(cov: mat2x2f) -> mat2x2f {
     return mat2x2f(axis1, axis2);
 }
 
-@vertex
-fn vertexMain(input: VertexInput) -> VertexOutput {
-    var output: VertexOutput;
-
-    // let gaussian = gaussians3d[input.instanceIndex];
-    // let gaussian = gaussians3d[ % 3];
-    let gaussian = gaussians3d[gaussianIndex[input.instanceIndex]];
-
-    let R = getRotationMatrix(globals.viewMatrix);
-    var J = getJacobianMatrix(gaussian.mean3d);
-
-    let cov2d = J * R * gaussian.cov3d * transpose(R) * transpose(J);
-    let mean2d = globals.projectionMatrix * globals.viewMatrix * vec4f(gaussian.mean3d, 1);
-
-    // output.position = globals.projectionMatrix * globals.viewMatrix * worldPos;
-    // output.cov2d = mat2x2f(cov2d[0].xy, cov2d[1].xy);
-    // output.position = globals.projectionMatrix * globals.viewMatrix * worldPos;
-
-    let cov2dInv = inverse2x2(mat2x2f(cov2d[0].xy, cov2d[1].xy));
-
-    output.position = vec4f(quadVertices[input.vertexIndex], 1);
-    output.mean2d = mean2d.xy / mean2d.w;
-    output.cov2dInv = vec4f(cov2dInv[0].xy, cov2dInv[1].xy);
-    output.color = gaussian.color;
-    output.clipPos = output.position.xyz / output.position.w;
-    output.opacity = gaussian.opacity;
-    return output;
-}
-
 fn inverse2x2(m: mat2x2f) -> mat2x2f {
     let a = m[0][0];
     let b = m[0][1];
@@ -134,10 +105,44 @@ fn inverse2x2(m: mat2x2f) -> mat2x2f {
     );
 }
 
+fn upper2x2(m: mat3x3f) -> mat2x2f {
+    return mat2x2f(m[0].xy, m[1].xy);
+}
+
+@vertex
+fn vertexMain(input: VertexInput) -> VertexOutput {
+    var output: VertexOutput;
+
+    // let gaussian = gaussians3d[input.instanceIndex];
+    // let gaussian = gaussians3d[ % 3];
+    let gaussian = gaussians3d[gaussianIndex[input.instanceIndex]];
+
+    let R = getRotationMatrix(globals.viewMatrix);
+    var J = getJacobianMatrix(gaussian.mean3d);
+
+    var meanClip = globals.projectionMatrix * globals.viewMatrix * vec4f(gaussian.mean3d, 1);
+    meanClip = meanClip.xyzw / meanClip.w;
+    output.mean2d = meanClip.xy;
+
+    let cov2d = upper2x2(J * R * gaussian.cov3d * transpose(R) * transpose(J));
+    let cov2dInv = inverse2x2(cov2d);
+    output.cov2dInv = vec4f(cov2dInv[0].xy, cov2dInv[1].xy);
+
+    let cov2dBasis = eigenBasis2x2(cov2d);
+    // output.position = vec4f(quadVertices[input.vertexIndex], 0, 1);
+    output.position = vec4f(meanClip.xy + 1 * cov2dBasis * quadVertices[input.vertexIndex], meanClip.z, 1);
+
+    output.color = gaussian.color;
+    output.clipPos = output.position.xyz / output.position.w;
+    output.opacity = gaussian.opacity;
+
+    return output;
+}
+
 @fragment
 fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
     let cov2dInv = mat2x2f(input.cov2dInv.xy, input.cov2dInv.zw);
     let x = input.clipPos.xy - input.mean2d;
-    let alpha = 0.7 * exp(-0.5 * dot(x, cov2dInv * x));
+    let alpha = input.opacity * exp(-0.5 * dot(x, cov2dInv * x));
     return vec4f(input.color * alpha, alpha);
 }
