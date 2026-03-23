@@ -1,16 +1,27 @@
 import Stats from 'stats.js';
+import { Pane } from 'tweakpane';
 import { mat4, vec3 } from 'wgpu-matrix';
-import { getSizeAndAlignmentOfUnsizedArrayElement, makeShaderDataDefinitions, makeStructuredView } from 'webgpu-utils';
-import { loadScene } from './loader';
+import { makeShaderDataDefinitions, makeStructuredView } from 'webgpu-utils';
+import { createGaussian3dData, createGaussianIndexData, DEFAULT_SCENE, getScene, sceneOptions, type Scene } from './loader';
 import { observeCanvasResize } from './utils';
 import shaderCode from './shaders.wgsl?raw';
 
-const SCENE = 'fur_armchair';
-
 const canvas = document.querySelector<HTMLCanvasElement>('canvas')!;
+const overlay = document.createElement('div');
+overlay.className = 'overlay';
+document.body.appendChild(overlay);
+
 const stats = new Stats();
 stats.showPanel(0);
-document.body.appendChild(stats.dom);
+stats.dom.style.position = 'relative';
+stats.dom.style.left = '0';
+stats.dom.style.top = '0';
+overlay.appendChild(stats.dom);
+
+const pane = new Pane({ container: overlay });
+pane.element.style.width = '220px';
+const params = { scene: DEFAULT_SCENE };
+const sceneBinding = (pane as any).addBinding(params, 'scene', { label: 'scene', options: sceneOptions });
 
 if (!navigator.gpu) {
     throw new Error('WebGPU not available');
@@ -105,61 +116,71 @@ const pipeline = device.createRenderPipeline({
     },
 });
 
-const scene = await loadScene(SCENE);
-
-const { size: gaussian3dSize } = getSizeAndAlignmentOfUnsizedArrayElement(shaderDefs.storages.gaussians3d);
-const gaussian3dData = makeStructuredView(
-    shaderDefs.storages.gaussians3d,
-    new ArrayBuffer(scene.count * gaussian3dSize),
-);
-gaussian3dData.set(Array.from({ length: scene.count }, (_, i) => {
-    const meanOffset = i * 3;
-    const covOffset = i * 9;
-    return {
-        mean3d: scene.means.subarray(meanOffset, meanOffset + 3),
-        cov3d: scene.cov3d.subarray(covOffset, covOffset + 9),
-        color: scene.color.subarray(meanOffset, meanOffset + 3),
-        opacity: scene.opacity[i],
-    };
-}));
-
-const gaussians3dBuffer = device.createBuffer({
-    size: gaussian3dData.arrayBuffer.byteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-});
-
-const gaussianIndexData = new Uint32Array(scene.count);
-for (let i = 0; i < gaussianIndexData.length; i++) {
-    gaussianIndexData[i] = i;
-}
-
-const gaussianIndexBuffer = device.createBuffer({
-    size: gaussianIndexData.byteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-});
-
-const globalsBindGroup = device.createBindGroup({
-    layout: globalsBindGroupLayout,
-    entries: [{
-        binding: 0,
-        resource: { buffer: globalsBuffer },
-    }, {
-        binding: 1,
-        resource: { buffer: gaussians3dBuffer },
-    }, {
-        binding: 2,
-        resource: { buffer: gaussianIndexBuffer },
-    }],
-});
-
-const target: [number, number, number] = [...scene.center];
-let orbitRadius = scene.radius * 4;
+const gaussianPosition = vec3.create();
+const target: [number, number, number] = [0, 0, 0];
+let scene = await getScene(params.scene);
+let gaussians3dBuffer: GPUBuffer;
+let gaussianIndexData: Uint32Array;
+let gaussianIndexBuffer: GPUBuffer;
+let globalsBindGroup: GPUBindGroup;
+let orbitRadius = 1;
 let azimuth = 0;
 let polar = 1.2;
 let dragging = false;
 let lastX = 0;
 let lastY = 0;
 let orderEnabled = false;
+let sceneRequest = 0;
+
+function applyScene(nextScene: Scene) {
+    const gaussian3dData = createGaussian3dData(nextScene, shaderDefs.storages.gaussians3d);
+
+    const nextGaussians3dBuffer = device.createBuffer({
+        size: gaussian3dData.arrayBuffer.byteLength,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    const nextGaussianIndexData = createGaussianIndexData(nextScene.count);
+    const nextGaussianIndexBuffer = device.createBuffer({
+        size: nextGaussianIndexData.byteLength,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    const nextGlobalsBindGroup = device.createBindGroup({
+        layout: globalsBindGroupLayout,
+        entries: [{
+            binding: 0,
+            resource: { buffer: globalsBuffer },
+        }, {
+            binding: 1,
+            resource: { buffer: nextGaussians3dBuffer },
+        }, {
+            binding: 2,
+            resource: { buffer: nextGaussianIndexBuffer },
+        }],
+    });
+
+    device.queue.writeBuffer(nextGaussians3dBuffer, 0, gaussian3dData.arrayBuffer);
+    device.queue.writeBuffer(nextGaussianIndexBuffer, 0, nextGaussianIndexData);
+    gaussians3dBuffer?.destroy();
+    gaussianIndexBuffer?.destroy();
+    scene = nextScene;
+    gaussians3dBuffer = nextGaussians3dBuffer;
+    gaussianIndexData = nextGaussianIndexData;
+    gaussianIndexBuffer = nextGaussianIndexBuffer;
+    globalsBindGroup = nextGlobalsBindGroup;
+    target[0] = nextScene.center[0];
+    target[1] = nextScene.center[1];
+    target[2] = nextScene.center[2];
+    orbitRadius = nextScene.radius * 4;
+}
+
+async function setScene(name: string) {
+    const request = ++sceneRequest;
+    const nextScene = await getScene(name);
+    if (request !== sceneRequest) {
+        return;
+    }
+    applyScene(nextScene);
+}
 
 function updateViewMatrix() {
     const sinPolar = Math.sin(polar);
@@ -215,7 +236,7 @@ window.addEventListener('keydown', (event) => {
         for (let i = 0; i < gaussianIndexData.length; i++) {
             gaussianIndexData[i] = i;
         }
-        device.queue.writeBuffer(gaussianIndexBuffer, 0, gaussianIndexData);
+        device.queue.writeBuffer(gaussianIndexBuffer, 0, gaussianIndexData.buffer as ArrayBuffer);
     }
 });
 
@@ -225,15 +246,13 @@ function handleResize() {
 }
 
 observeCanvasResize(canvas, device, handleResize);
+applyScene(scene);
 handleResize();
 updateViewMatrix();
 
 device.queue.writeBuffer(globalsBuffer, 0, globalsData.arrayBuffer);
-device.queue.writeBuffer(gaussians3dBuffer, 0, gaussian3dData.arrayBuffer);
-device.queue.writeBuffer(gaussianIndexBuffer, 0, gaussianIndexData);
 
 function orderGaussians() {
-    const gaussianPosition = vec3.create();
     const viewProjection = mat4.mul(globalsData.views.projectionMatrix, globalsData.views.viewMatrix);
     const depths = new Float32Array(scene.count);
     for (let i = 0; i < scene.count; i++) {
@@ -242,8 +261,12 @@ function orderGaussians() {
         depths[i] = vec3.transformMat4(gaussianPosition, viewProjection)[2];
     }
     gaussianIndexData.sort((a, b) => depths[b] - depths[a]);
-    device.queue.writeBuffer(gaussianIndexBuffer, 0, gaussianIndexData);
+    device.queue.writeBuffer(gaussianIndexBuffer, 0, gaussianIndexData.buffer as ArrayBuffer);
 }
+
+sceneBinding.on('change', (event: { value: string }) => {
+    void setScene(event.value);
+});
 
 function renderFrame() {
     stats.begin();

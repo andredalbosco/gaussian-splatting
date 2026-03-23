@@ -14,8 +14,10 @@ import {
 } from '@playcanvas/splat-transform';
 import type { ColumnType, Options, ReadFileSystem } from '@playcanvas/splat-transform';
 import { GSplatData } from 'playcanvas';
+import { getSizeAndAlignmentOfUnsizedArrayElement, makeStructuredView } from 'webgpu-utils';
 import webpWasmUrl from '@playcanvas/splat-transform/lib/webp.wasm?url';
 
+const DEFAULT_SCENE = 'fur_armchair';
 const SCENE_FILES = [
     'meta.json',
     'means_l.webp',
@@ -35,6 +37,12 @@ const sceneAssets = Object.entries(import.meta.glob<string>('../assets/*/*', {
     (scenes[scene] ??= {})[file] = url;
     return scenes;
 }, {} as Record<string, Record<string, string>>);
+const sceneNames = Object.keys(sceneAssets).sort((a, b) =>
+    a === DEFAULT_SCENE ? -1 : b === DEFAULT_SCENE ? 1 : a.localeCompare(b));
+const sceneOptions = Object.fromEntries(sceneNames.map((name) => [
+    name.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
+    name,
+]));
 
 type Scene = {
     means: Float32Array,
@@ -181,6 +189,7 @@ const validateGSplatData = (gsplatData: GSplatData): void => {
 const rotatePoint = (x: number, y: number, z: number): [number, number, number] => [x, -y, -z];
 const SH_C0 = 0.28209479177387814;
 const sigmoid = (x: number) => x > 0 ? 1 / (1 + Math.exp(-x)) : Math.exp(x) / (1 + Math.exp(x));
+const sceneCache = new Map<string, Promise<Scene>>();
 
 const loadScene = async (scene: string): Promise<Scene> => {
     WebPCodec.wasmUrl = webpWasmUrl;
@@ -295,9 +304,51 @@ const loadScene = async (scene: string): Promise<Scene> => {
     };
 };
 
+const getScene = (name: string) => {
+    let promise = sceneCache.get(name);
+    if (!promise) {
+        promise = loadScene(name);
+        sceneCache.set(name, promise);
+    }
+    return promise;
+};
+
+const createGaussian3dData = (scene: Scene, gaussian3dDef: Parameters<typeof makeStructuredView>[0]) => {
+    const { size } = getSizeAndAlignmentOfUnsizedArrayElement(gaussian3dDef);
+    const gaussian3dData = makeStructuredView(
+        gaussian3dDef,
+        new ArrayBuffer(scene.count * size),
+    );
+    gaussian3dData.set(Array.from({ length: scene.count }, (_, i) => {
+        const meanOffset = i * 3;
+        const covOffset = i * 9;
+        return {
+            mean3d: scene.means.subarray(meanOffset, meanOffset + 3),
+            cov3d: scene.cov3d.subarray(covOffset, covOffset + 9),
+            color: scene.color.subarray(meanOffset, meanOffset + 3),
+            opacity: scene.opacity[i],
+        };
+    }));
+    return gaussian3dData;
+};
+
+const createGaussianIndexData = (count: number) => {
+    const gaussianIndexData = new Uint32Array(count);
+    for (let i = 0; i < gaussianIndexData.length; i++) {
+        gaussianIndexData[i] = i;
+    }
+    return gaussianIndexData;
+};
+
 export {
+    createGaussian3dData,
+    createGaussianIndexData,
+    DEFAULT_SCENE,
+    getScene,
     loadScene,
     loadGSplatData,
     type Scene,
+    sceneNames,
+    sceneOptions,
     validateGSplatData
 };
