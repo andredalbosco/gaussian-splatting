@@ -106,8 +106,6 @@ const pipeline = device.createRenderPipeline({
 });
 
 const scene = await loadScene(SCENE);
-const splatStdDev = Math.max(scene.radius / 150, 0.002);
-const variance = splatStdDev * splatStdDev;
 
 const { size: gaussian3dSize } = getSizeAndAlignmentOfUnsizedArrayElement(shaderDefs.storages.gaussians3d);
 const gaussian3dData = makeStructuredView(
@@ -115,16 +113,13 @@ const gaussian3dData = makeStructuredView(
     new ArrayBuffer(scene.count * gaussian3dSize),
 );
 gaussian3dData.set(Array.from({ length: scene.count }, (_, i) => {
-    const base = i * 3;
+    const meanOffset = i * 3;
+    const covOffset = i * 9;
     return {
-        mean3d: scene.means.subarray(base, base + 3),
-        cov3d: [
-            variance, 0, 0,
-            0, variance, 0,
-            0, 0, variance,
-        ],
-        color: [0.95, 0.9, 0.82],
-        opacity: 0.9,
+        mean3d: scene.means.subarray(meanOffset, meanOffset + 3),
+        cov3d: scene.cov3d.subarray(covOffset, covOffset + 9),
+        color: scene.color.subarray(meanOffset, meanOffset + 3),
+        opacity: scene.opacity[i],
     };
 }));
 

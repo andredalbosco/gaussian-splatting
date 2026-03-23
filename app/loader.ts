@@ -38,6 +38,9 @@ const sceneAssets = Object.entries(import.meta.glob<string>('../assets/*/*', {
 
 type Scene = {
     means: Float32Array,
+    cov3d: Float32Array,
+    color: Float32Array,
+    opacity: Float32Array,
     count: number,
     center: [number, number, number],
     radius: number,
@@ -176,6 +179,8 @@ const validateGSplatData = (gsplatData: GSplatData): void => {
 };
 
 const rotatePoint = (x: number, y: number, z: number): [number, number, number] => [x, -y, -z];
+const SH_C0 = 0.28209479177387814;
+const sigmoid = (x: number) => x > 0 ? 1 / (1 + Math.exp(-x)) : Math.exp(x) / (1 + Math.exp(x));
 
 const loadScene = async (scene: string): Promise<Scene> => {
     WebPCodec.wasmUrl = webpWasmUrl;
@@ -187,10 +192,25 @@ const loadScene = async (scene: string): Promise<Scene> => {
     }));
 
     const gsplatData = await loadGSplatData('meta.json', fileSystem);
+    validateGSplatData(gsplatData);
     const x = gsplatData.getProp('x') as Float32Array;
     const y = gsplatData.getProp('y') as Float32Array;
     const z = gsplatData.getProp('z') as Float32Array;
+    const scale0 = gsplatData.getProp('scale_0') as Float32Array;
+    const scale1 = gsplatData.getProp('scale_1') as Float32Array;
+    const scale2 = gsplatData.getProp('scale_2') as Float32Array;
+    const rot0 = gsplatData.getProp('rot_0') as Float32Array;
+    const rot1 = gsplatData.getProp('rot_1') as Float32Array;
+    const rot2 = gsplatData.getProp('rot_2') as Float32Array;
+    const rot3 = gsplatData.getProp('rot_3') as Float32Array;
+    const fdc0 = gsplatData.getProp('f_dc_0') as Float32Array;
+    const fdc1 = gsplatData.getProp('f_dc_1') as Float32Array;
+    const fdc2 = gsplatData.getProp('f_dc_2') as Float32Array;
+    const opacityProp = gsplatData.getProp('opacity') as Float32Array;
     const means = new Float32Array(gsplatData.numSplats * 3);
+    const cov3d = new Float32Array(gsplatData.numSplats * 9);
+    const color = new Float32Array(gsplatData.numSplats * 3);
+    const opacity = new Float32Array(gsplatData.numSplats);
 
     let minX = Infinity;
     let minY = Infinity;
@@ -205,6 +225,53 @@ const loadScene = async (scene: string): Promise<Scene> => {
         means[offset + 0] = px;
         means[offset + 1] = py;
         means[offset + 2] = pz;
+
+        const sx = Math.exp(scale0[i]);
+        const sy = Math.exp(scale1[i]);
+        const sz = Math.exp(scale2[i]);
+        const qx = rot1[i];
+        const qy = rot2[i];
+        const qz = rot3[i];
+        const qw = rot0[i];
+        const x2 = qx + qx;
+        const y2 = qy + qy;
+        const z2 = qz + qz;
+        const xx = qx * x2;
+        const xy = qx * y2;
+        const xz = qx * z2;
+        const yy = qy * y2;
+        const yz = qy * z2;
+        const zz = qz * z2;
+        const wx = qw * x2;
+        const wy = qw * y2;
+        const wz = qw * z2;
+        const r00 = 1 - yy - zz;
+        const r01 = xy - wz;
+        const r02 = xz + wy;
+        const r10 = xy + wz;
+        const r11 = 1 - xx - zz;
+        const r12 = yz - wx;
+        const r20 = xz - wy;
+        const r21 = yz + wx;
+        const r22 = 1 - xx - yy;
+        const sxx = sx * sx;
+        const syy = sy * sy;
+        const szz = sz * sz;
+        const covOffset = i * 9;
+        cov3d[covOffset + 0] = r00 * r00 * sxx + r01 * r01 * syy + r02 * r02 * szz;
+        cov3d[covOffset + 1] = -(r00 * r10 * sxx + r01 * r11 * syy + r02 * r12 * szz);
+        cov3d[covOffset + 2] = -(r00 * r20 * sxx + r01 * r21 * syy + r02 * r22 * szz);
+        cov3d[covOffset + 3] = cov3d[covOffset + 1];
+        cov3d[covOffset + 4] = r10 * r10 * sxx + r11 * r11 * syy + r12 * r12 * szz;
+        cov3d[covOffset + 5] = r10 * r20 * sxx + r11 * r21 * syy + r12 * r22 * szz;
+        cov3d[covOffset + 6] = cov3d[covOffset + 2];
+        cov3d[covOffset + 7] = cov3d[covOffset + 5];
+        cov3d[covOffset + 8] = r20 * r20 * sxx + r21 * r21 * syy + r22 * r22 * szz;
+        color[offset + 0] = 0.5 + SH_C0 * fdc0[i];
+        color[offset + 1] = 0.5 + SH_C0 * fdc1[i];
+        color[offset + 2] = 0.5 + SH_C0 * fdc2[i];
+        opacity[i] = sigmoid(opacityProp[i]);
+
         minX = Math.min(minX, px);
         minY = Math.min(minY, py);
         minZ = Math.min(minZ, pz);
@@ -215,6 +282,9 @@ const loadScene = async (scene: string): Promise<Scene> => {
 
     return {
         means,
+        cov3d,
+        color,
+        opacity,
         count: gsplatData.numSplats,
         center: [
             0.5 * (minX + maxX),
