@@ -58,13 +58,13 @@ fn getRotationMatrix(M: mat4x4f) -> mat3x3f {
 fn getJacobianMatrix(mean3d: vec3f) -> mat3x3f {
     let u = (globals.viewMatrix * vec4f(mean3d, 1)).xyz;
     let l = length(u);
+    let hx = globals.projectionMatrix[0][0];
+    let hy = globals.projectionMatrix[1][1];
     var J = transpose(mat3x3f(
-        vec3f(1 / u.z, 0, -u.x / (u.z * u.z)),
-        vec3f(0, 1 / u.z, -u.y / (u.z * u.z)),
+        vec3f(hx / u.z, 0, -hx * u.x / (u.z * u.z)),
+        vec3f(0, hy / u.z, -hy * u.y / (u.z * u.z)),
         u / l,
     ));
-    // J[0] *= globals.projectionMatrix[0][0];
-    // J[1] *= globals.projectionMatrix[1][1];
     return J;
 }
 

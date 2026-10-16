@@ -129,7 +129,7 @@ let polar = 1.2;
 let dragging = false;
 let lastX = 0;
 let lastY = 0;
-let orderEnabled = false;
+let orderEnabled = true;
 let sceneRequest = 0;
 
 function applyScene(nextScene: Scene) {
