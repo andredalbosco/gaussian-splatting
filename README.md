@@ -1,6 +1,13 @@
-# gaussian-splatting
-## References
-- [3D Gaussian Splatting for Real-Time Radiance Field Rendering](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/)
-- [EWA Volume Splatting](https://www.cs.umd.edu/~zwicker/publications/EWAVolumeSplatting-VIS01.pdf)
-- [3DGS Lab (George Kopanas)](https://web.archive.org/web/20260210171651id_/https://nbviewer.org/url/grgkopanas.github.io/3DGS_Lab_Exercise.ipynb)
-- [Georgios Kopanas PhD Thesis](https://theses.hal.science/tel-04497867)
+# Gaussian Splatting
+
+A starting point for Gaussian splatting using WebGPU through Dawn.
+For now, `main.cpp` only prints `Hello, world!`.
+
+Dawn is pinned as a Git submodule in `external/dawn`. It is not built or linked yet.
+
+```sh
+git submodule update --init
+cmake -S . -B build
+cmake --build build
+./build/gaussian_splatting
+```
