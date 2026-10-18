@@ -1,0 +1,2 @@
+name, driver_version, utilization.gpu [%], temperature.gpu, power.draw [W]
+NVIDIA GeForce RTX 4090, 580.159.03, 31 %, 32, 89.30 W

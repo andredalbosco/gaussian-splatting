@@ -2,11 +2,15 @@
 #include "gaussian.hpp"
 #include "utils.hpp"
 
+#include <algorithm>
 #include <iostream>
+#include <numeric>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Core>
+#include <Eigen/Geometry>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -24,36 +28,41 @@ struct GSplatApp {
 
     wgpu::Surface surface;
     wgpu::SurfaceConfiguration surfaceConfig;
-    wgpu::TextureFormat colorFormat;
-    static constexpr wgpu::TextureFormat depthFormat = wgpu::TextureFormat::Depth24Plus;
 
     wgpu::RenderPipeline pipeline;
     wgpu::BindGroup bindGroup;
-    wgpu::Texture depthTexture;
 
     wgpu::Buffer gaussianBuffer;
+    wgpu::Buffer orderBuffer;
+    wgpu::Buffer cameraBuffer;
+
+    std::vector<Gaussian> gaussians;
     uint32_t gaussianCount;
+    Eigen::AlignedBox3f bounds;
+
+    std::vector<uint32_t> order;
+    std::vector<float> depths;
+    Eigen::Vector3f lastSortDirection = Eigen::Vector3f::Zero();
 
     OrbitCamera camera;
-    float initialCameraDistance;
-    static constexpr float fitDistanceFactor = 3.5f;
-    static constexpr float minDistanceFactor = 0.3f;
-    static constexpr float maxDistanceFactor = 20.0f;
-    wgpu::Buffer cameraBuffer;
 
     Eigen::Vector2d mouse = Eigen::Vector2d::Zero();
     float scrollDelta = 0;
 
     bool init();
-    void shutdown();
     void run();
+    void shutdown();
 
-    bool loadScene();
+    bool loadGaussians(const char* path);
 
-    void initPipeline();
+    void createPipeline();
+    void createBuffers();
+    void createBindGroup();
+
     void drawFrame();
     void drawUi();
 
+    void resetCamera();
     void updateCamera();
 
     void handleInput();
@@ -61,42 +70,20 @@ struct GSplatApp {
 };
 
 bool GSplatApp::init() {
-    initGlfw(800, 600, "Gaussian Splatting - Luigi", window);
+    initGlfw(800, 600, "Gaussian Splatting", window);
     initWgpu(window, instance, device, surface, surfaceConfig);
     if (!device) return false;
 
-    colorFormat = surfaceConfig.format;
     queue = device.GetQueue();
     glfwSetWindowUserPointer(window, this);
     glfwSetScrollCallback(window, onScroll);
 
-    if (!loadScene()) return false;
-    initPipeline();
+    createPipeline();
 
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
+    initImgui(device, window, surfaceConfig.format);
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::GetIO().IniFilename = nullptr;
-    ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOther(window, true);
-#ifdef __EMSCRIPTEN__
-    ImGui_ImplGlfw_InstallEmscriptenCallbacks(window, "#canvas");
-#endif
-    ImGui_ImplWGPU_InitInfo imguiInfo;
-    imguiInfo.Device = device.Get();
-    imguiInfo.RenderTargetFormat = static_cast<WGPUTextureFormat>(colorFormat);
-    imguiInfo.DepthStencilFormat = static_cast<WGPUTextureFormat>(depthFormat);
-    ImGui_ImplWGPU_Init(&imguiInfo);
 
     return true;
-}
-
-void GSplatApp::shutdown() {
-    ImGui_ImplWGPU_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-    shutdownWgpu(surface);
-    shutdownGlfw(window);
 }
 
 void GSplatApp::run() {
@@ -113,51 +100,42 @@ void GSplatApp::run() {
 #endif
 }
 
-bool GSplatApp::loadScene() {
-    std::vector<Gaussian> gaussians = readPlyFile(SOURCE_DIR "/assets/luigi.ply");
-    if (gaussians.empty()) return false;
+void GSplatApp::shutdown() {
+    shutdownImgui();
+    shutdownWgpu(surface);
+    shutdownGlfw(window);
+}
+
+bool GSplatApp::loadGaussians(const char* path) {
+    auto newGaussians = readPlyFile(path);
+    if (newGaussians.empty()) return false;
+    gaussians = std::move(newGaussians);
 
     gaussianCount = gaussians.size();
     std::cout << "Loaded " << gaussianCount << " Gaussians\n";
 
-    Eigen::Vector3f lower = gaussians[0].position.head<3>();
-    Eigen::Vector3f upper = lower;
-
+    bounds.setEmpty();
     for (const Gaussian& gaussian : gaussians) {
-        lower = lower.cwiseMin(gaussian.position.head<3>());
-        upper = upper.cwiseMax(gaussian.position.head<3>());
+        bounds.extend(gaussian.position.head<3>());
     }
-
-    float radius = 0.5f * (upper - lower).maxCoeff();
-    camera.center = 0.5f * (lower + upper);
-    camera.distance = fitDistanceFactor * radius;
-    camera.minDistance = minDistanceFactor * radius;
-    camera.maxDistance = maxDistanceFactor * radius;
-    initialCameraDistance = camera.distance;
-
-    wgpu::BufferDescriptor gaussianBufferDesc {
-        .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst,
-        .size = gaussians.size() * sizeof(Gaussian),
-    };
-    gaussianBuffer = device.CreateBuffer(&gaussianBufferDesc);
-    queue.WriteBuffer(gaussianBuffer, 0, gaussians.data(), gaussianBufferDesc.size);
-
-    Eigen::Matrix4f viewProjection = Eigen::Matrix4f::Identity();
-    wgpu::BufferDescriptor cameraBufferDesc {
-        .usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
-        .size = sizeof(viewProjection) + sizeof(Eigen::Vector4f),
-    };
-    cameraBuffer = device.CreateBuffer(&cameraBufferDesc);
-    queue.WriteBuffer(cameraBuffer, 0, viewProjection.data(), sizeof(viewProjection));
+    resetCamera();
+    lastSortDirection.setZero();
+    createBuffers();
+    createBindGroup();
 
     return true;
 }
 
-void GSplatApp::initPipeline() {
+void GSplatApp::createPipeline() {
     wgpu::ShaderModule shader = readWgslFile(device, SOURCE_DIR "/src/shaders.wgsl");
 
+    wgpu::BlendState blend {
+        .color = {.srcFactor = wgpu::BlendFactor::One, .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
+        .alpha = {.srcFactor = wgpu::BlendFactor::One, .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
+    };
     wgpu::ColorTargetState target {
-        .format = colorFormat,
+        .format = surfaceConfig.format,
+        .blend = &blend,
     };
 
     wgpu::FragmentState fragment {
@@ -167,26 +145,46 @@ void GSplatApp::initPipeline() {
         .targets = &target,
     };
 
-    wgpu::DepthStencilState depthState {
-        .format = depthFormat,
-        .depthWriteEnabled = true,
-        .depthCompare = wgpu::CompareFunction::Less,
-    };
-
     wgpu::RenderPipelineDescriptor pipelineDesc {
         .vertex = {
             .module = shader,
             .entryPoint = "vs_main",
         },
         .primitive = {
-            .topology = wgpu::PrimitiveTopology::TriangleList,
-            .cullMode = wgpu::CullMode::Front,
+            .topology = wgpu::PrimitiveTopology::TriangleStrip,
+            .cullMode = wgpu::CullMode::None,
         },
-        .depthStencil = &depthState,
         .fragment = &fragment,
     };
     pipeline = device.CreateRenderPipeline(&pipelineDesc);
+}
 
+void GSplatApp::createBuffers() {
+    wgpu::BufferDescriptor gaussianBufferDesc {
+        .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst,
+        .size = gaussians.size() * sizeof(Gaussian),
+    };
+    gaussianBuffer = device.CreateBuffer(&gaussianBufferDesc);
+    queue.WriteBuffer(gaussianBuffer, 0, gaussians.data(), gaussianBufferDesc.size);
+
+    order.resize(gaussianCount);
+    depths.resize(gaussianCount);
+    std::iota(order.begin(), order.end(), 0u);
+
+    wgpu::BufferDescriptor orderBufferDesc {
+        .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst,
+        .size = gaussianCount * sizeof(uint32_t),
+    };
+    orderBuffer = device.CreateBuffer(&orderBufferDesc);
+
+    wgpu::BufferDescriptor cameraBufferDesc {
+        .usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
+        .size = sizeof(Eigen::Matrix4f) + sizeof(Eigen::Vector4f),
+    };
+    cameraBuffer = device.CreateBuffer(&cameraBufferDesc);
+}
+
+void GSplatApp::createBindGroup() {
     wgpu::BindGroupEntry entries[] {
         {
             .binding = 0,
@@ -198,11 +196,16 @@ void GSplatApp::initPipeline() {
             .buffer = cameraBuffer,
             .size = cameraBuffer.GetSize(),
         },
+        {
+            .binding = 2,
+            .buffer = orderBuffer,
+            .size = orderBuffer.GetSize(),
+        },
     };
 
     wgpu::BindGroupDescriptor bindGroupDesc {
         .layout = pipeline.GetBindGroupLayout(0),
-        .entryCount = 2,
+        .entryCount = 3,
         .entries = entries,
     };
     bindGroup = device.CreateBindGroup(&bindGroupDesc);
@@ -220,18 +223,6 @@ void GSplatApp::drawFrame() {
     updateCamera();
     ImGui::Render();
 
-    if (!depthTexture || depthTexture.GetWidth() != surfaceConfig.width ||
-        depthTexture.GetHeight() != surfaceConfig.height) {
-        if (depthTexture) depthTexture.Destroy();
-
-        wgpu::TextureDescriptor depthDesc {
-            .usage = wgpu::TextureUsage::RenderAttachment,
-            .size = {surfaceConfig.width, surfaceConfig.height, 1},
-            .format = depthFormat,
-        };
-        depthTexture = device.CreateTexture(&depthDesc);
-    }
-
     wgpu::SurfaceTexture frame;
     surface.GetCurrentTexture(&frame);
     if (!frame.texture) return;
@@ -243,24 +234,16 @@ void GSplatApp::drawFrame() {
         .clearValue = {0.05, 0.05, 0.07, 1.0},
     };
 
-    wgpu::RenderPassDepthStencilAttachment depth {
-        .view = depthTexture.CreateView(),
-        .depthLoadOp = wgpu::LoadOp::Clear,
-        .depthStoreOp = wgpu::StoreOp::Store,
-        .depthClearValue = 1.0f,
-    };
-
     wgpu::RenderPassDescriptor passDesc {
         .colorAttachmentCount = 1,
         .colorAttachments = &color,
-        .depthStencilAttachment = &depth,
     };
 
     wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
     wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&passDesc);
     pass.SetPipeline(pipeline);
     pass.SetBindGroup(0, bindGroup);
-    pass.Draw(36, gaussianCount);
+    pass.Draw(4, gaussianCount);
     ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), pass.Get());
     pass.End();
 
@@ -274,10 +257,11 @@ void GSplatApp::drawFrame() {
 }
 
 void GSplatApp::drawUi() {
-    ImGui::SetNextWindowPos({12, 12}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize({340, 480}, ImGuiCond_FirstUseEver);
+    float uiScale = ImGui::GetStyle().FontScaleDpi;
+    ImGui::SetNextWindowPos({12 * uiScale, 12 * uiScale}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({340 * uiScale, 480 * uiScale}, ImGuiCond_FirstUseEver);
     ImGui::Begin("Gaussian Splatting");
-    ImGui::PushItemWidth(150);
+    ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
     ImGui::Text("%u Gaussians", gaussianCount);
     ImGui::Text("%.1f FPS (%.2f ms)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
 
@@ -304,22 +288,37 @@ void GSplatApp::drawUi() {
         "%.3f",
         ImGuiSliderFlags_Logarithmic
     );
-    if (ImGui::Button("Reset camera")) {
-        camera.distance = initialCameraDistance;
-        camera.yaw = 10;
-        camera.pitch = 5;
-    }
+    if (ImGui::Button("Reset camera")) resetCamera();
     ImGui::PopItemWidth();
     ImGui::End();
+}
+
+void GSplatApp::resetCamera() {
+    float radius = 0.5f * bounds.sizes().maxCoeff();
+    camera.center = bounds.center();
+    camera.distance = 3.5f * radius;
+    camera.minDistance = 0.3f * radius;
+    camera.maxDistance = 20.0f * radius;
+    camera.yaw = 10;
+    camera.pitch = 5;
 }
 
 void GSplatApp::updateCamera() {
     Eigen::Matrix4f viewProjection = camera.viewProjection(
         float(surfaceConfig.width) / surfaceConfig.height);
     queue.WriteBuffer(cameraBuffer, 0, viewProjection.data(), sizeof(viewProjection));
-    Eigen::Vector4f position;
-    position << camera.position(), 1.0f;
-    queue.WriteBuffer(cameraBuffer, sizeof(viewProjection), position.data(), sizeof(position));
+    Eigen::Vector4f viewport {float(surfaceConfig.width), float(surfaceConfig.height), 0, 0};
+    queue.WriteBuffer(cameraBuffer, sizeof(viewProjection), viewport.data(), sizeof(viewport));
+
+    Eigen::Vector3f direction = (camera.center - camera.position()).normalized();
+    if ((direction - lastSortDirection).squaredNorm() == 0) return;
+    lastSortDirection = direction;
+    for (uint32_t i = 0; i < gaussianCount; i++)
+        depths[i] = direction.dot(gaussians[i].position.head<3>());
+    std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
+        return depths[a] == depths[b] ? a < b : depths[a] > depths[b];
+    });
+    queue.WriteBuffer(orderBuffer, 0, order.data(), order.size() * sizeof(uint32_t));
 }
 
 void GSplatApp::handleInput() {
@@ -337,7 +336,7 @@ void GSplatApp::handleInput() {
     mouse = position;
 }
 
-void GSplatApp::onScroll(GLFWwindow* window, double x, double y) {
+void GSplatApp::onScroll(GLFWwindow* window, double, double y) {
     GSplatApp* app = static_cast<GSplatApp*>(glfwGetWindowUserPointer(window));
     app->scrollDelta += static_cast<float>(y);
 }
@@ -345,12 +344,16 @@ void GSplatApp::onScroll(GLFWwindow* window, double x, double y) {
 int main(int argc, char* argv[]) {
     static GSplatApp app {};
     if (!app.init()) return 1;
+    if (!app.loadGaussians(SOURCE_DIR "/assets/luigi.ply")) {
+        app.shutdown();
+        return 1;
+    }
 
     if (argc > 1 && std::string_view(argv[1]) == "--capture") {
         app.drawFrame();
         app.shutdown();
-        return 0;
+    } else {
+        app.run();
     }
-
-    app.run();
+    return 0;
 }

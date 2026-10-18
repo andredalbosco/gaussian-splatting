@@ -1,10 +1,7 @@
 #pragma once
 
-#include "gaussian.hpp"
-
 #include <cstdint>
 #include <string>
-#include <vector>
 
 #include <webgpu/webgpu_cpp.h>
 
@@ -15,8 +12,16 @@ struct Extent2D {
     uint32_t height;
 };
 
-Extent2D getFramebufferSize(GLFWwindow* window);
-bool checkFramebufferSize(Extent2D size);
+void initGlfw(int width, int height, const char* title, GLFWwindow*& window);
+void shutdownGlfw(GLFWwindow* window);
+
+void initImgui(
+    const wgpu::Device& device,
+    GLFWwindow* window,
+    wgpu::TextureFormat colorFormat,
+    wgpu::TextureFormat depthFormat = wgpu::TextureFormat::Undefined
+);
+void shutdownImgui();
 
 wgpu::Instance createInstance();
 wgpu::Surface createSurface(const wgpu::Instance& instance, GLFWwindow* window);
@@ -29,9 +34,6 @@ wgpu::SurfaceConfiguration configureSurface(
     GLFWwindow* window
 );
 
-void initGlfw(int width, int height, const char* title, GLFWwindow*& window);
-void shutdownGlfw(GLFWwindow* window);
-
 void initWgpu(
     GLFWwindow* window,
     wgpu::Instance& instance,
@@ -41,6 +43,8 @@ void initWgpu(
 );
 void shutdownWgpu(wgpu::Surface& surface);
 
+Extent2D getFramebufferSize(GLFWwindow* window);
+bool checkFramebufferSize(Extent2D size);
 bool handleWindowResize(
     const wgpu::Surface& surface,
     GLFWwindow* window,
@@ -48,5 +52,4 @@ bool handleWindowResize(
 );
 
 std::string readFile(const char* path);
-std::vector<Gaussian> readPlyFile(const char* path);
 wgpu::ShaderModule readWgslFile(const wgpu::Device& device, const char* path);

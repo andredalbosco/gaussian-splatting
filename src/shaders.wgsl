@@ -7,25 +7,7 @@ struct Gaussian {
 
 struct Camera {
     view_projection: mat4x4f,
-    position: vec4f,
-}
-
-struct Ray {
-    origin: vec3f,
-    direction: vec3f,
-}
-
-struct Sphere {
-    center: vec3f,
-    radius: f32,
-}
-
-const unit_sphere = Sphere(vec3f(0), 1.0);
-
-struct Ellipsoid {
-    center: vec3f,
-    scale: vec3f,
-    rotation: vec4f,
+    viewport: vec4f,
 }
 
 struct VSInput {
@@ -35,92 +17,57 @@ struct VSInput {
 
 struct VSOutput {
     @builtin(position) position: vec4f,
-    @location(2) world_pos: vec3f,
-    @location(0) @interpolate(flat) color: vec3f,
-    @location(1) @interpolate(flat) ellipsoid_center: vec3f,
-    @location(3) @interpolate(flat) ellipsoid_scale: vec3f,
-    @location(4) @interpolate(flat) ellipsoid_rotation: vec4f,
-}
-
-struct FSOutput {
-    @location(0) color: vec4f,
-    @builtin(frag_depth) depth: f32,
+    @location(0) offset: vec2f,
+    @location(1) @interpolate(flat) conic: vec3f,
+    @location(2) @interpolate(flat) color: vec4f,
 }
 
 @group(0) @binding(0) var<storage, read> gaussians: array<Gaussian>;
 @group(0) @binding(1) var<uniform> camera: Camera;
+@group(0) @binding(2) var<storage, read> order: array<u32>;
 
-const box_corners = array(
-    vec3f(-1, -1, -1), vec3f(1, -1, -1), vec3f(1, 1, -1), vec3f(-1, 1, -1),
-    vec3f(-1, -1, 1), vec3f(1, -1, 1), vec3f(1, 1, 1), vec3f(-1, 1, 1),
-);
-
-const box_indices = array(
-    0u, 2u, 1u, 0u, 3u, 2u,
-    4u, 5u, 6u, 4u, 6u, 7u,
-    0u, 4u, 7u, 0u, 7u, 3u,
-    1u, 2u, 6u, 1u, 6u, 5u,
-    0u, 1u, 5u, 0u, 5u, 4u,
-    3u, 7u, 6u, 3u, 6u, 2u,
-);
+const quad_corners = array(vec2f(-1, -1), vec2f(1, -1), vec2f(-1, 1), vec2f(1, 1));
 
 fn quat_rotate(q: vec4f, v: vec3f) -> vec3f {
     return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
 }
 
-fn ray_intersect_sphere(ray: Ray, sphere: Sphere) -> f32 {
-    let offset = ray.origin - sphere.center;
-    let a = dot(ray.direction, ray.direction);
-    let b = dot(offset, ray.direction) / a;
-    let closest = offset - b * ray.direction;
-    let delta = (sphere.radius * sphere.radius - dot(closest, closest)) / a;
-    if (delta < 0.0) { return -1.0; }
-
-    let sqrt_delta = sqrt(delta);
-    var t = -b - sqrt_delta;
-    if (t <= 0.0) { t = -b + sqrt_delta; }
-    if (t <= 0.0) { return -1.0; }
-    return t;
-}
-
-fn ray_intersect_ellipsoid(ray: Ray, ellipsoid: Ellipsoid) -> f32 {
-    let inverse_rotation = vec4f(-ellipsoid.rotation.xyz, ellipsoid.rotation.w);
-    let local_ray = Ray(
-        quat_rotate(inverse_rotation, ray.origin - ellipsoid.center) / ellipsoid.scale,
-        quat_rotate(inverse_rotation, ray.direction) / ellipsoid.scale,
-    );
-    return ray_intersect_sphere(local_ray, unit_sphere);
+fn projected_axis(gaussian: Gaussian, clip: vec4f, local_axis: vec3f) -> vec2f {
+    let axis = camera.view_projection * vec4f(quat_rotate(gaussian.rotation, local_axis), 0);
+    return (axis.xy * clip.w - clip.xy * axis.w) / (clip.w * clip.w) * camera.viewport.xy * 0.5;
 }
 
 @vertex fn vs_main(input: VSInput) -> VSOutput {
-    let gaussian = gaussians[input.instance_index];
-    let local = box_corners[box_indices[input.vertex_index]] * gaussian.scale.xyz;
-    let world_pos = gaussian.position.xyz + quat_rotate(gaussian.rotation, local);
-
+    let gaussian = gaussians[order[input.instance_index]];
+    let clip = camera.view_projection * vec4f(gaussian.position.xyz, 1);
     var output: VSOutput;
-    output.position = camera.view_projection * vec4f(world_pos, 1.0);
-    output.color = gaussian.color.rgb;
-    output.ellipsoid_center = gaussian.position.xyz;
-    output.ellipsoid_scale = gaussian.scale.xyz;
-    output.ellipsoid_rotation = gaussian.rotation;
-    output.world_pos = world_pos;
+    output.position = vec4f(2, 2, 0, 1);
+    if (clip.w <= 0.0 || clip.z < 0.0 || clip.z > clip.w) { return output; }
 
+    // Columns of B = J * R_camera * R_object * S; covariance = B * transpose(B).
+    let ax = projected_axis(gaussian, clip, vec3f(gaussian.scale.x, 0, 0));
+    let ay = projected_axis(gaussian, clip, vec3f(0, gaussian.scale.y, 0));
+    let az = projected_axis(gaussian, clip, vec3f(0, 0, gaussian.scale.z));
+    let x = vec3f(ax.x, ay.x, az.x);
+    let y = vec3f(ax.y, ay.y, az.y);
+    let a = dot(x, x) + 0.3;
+    let b = dot(x, y);
+    let c = dot(y, y) + 0.3;
+    let determinant = a * c - b * b;
+    if (determinant <= 0.0) { return output; }
+
+    output.offset = quad_corners[input.vertex_index] * 3.0 * sqrt(vec2f(a, c));
+    output.position = vec4f(clip.xy / clip.w + output.offset * 2.0 / camera.viewport.xy, clip.z / clip.w, 1);
+    output.conic = vec3f(c, -b, a) / determinant;
+    output.color = gaussian.color;
     return output;
 }
 
-@fragment fn fs_main(input: VSOutput) -> FSOutput {
-    let ray = Ray(camera.position.xyz, normalize(input.world_pos - camera.position.xyz));
-    let ellipsoid = Ellipsoid(input.ellipsoid_center, input.ellipsoid_scale, input.ellipsoid_rotation);
-    let t = ray_intersect_ellipsoid(ray, ellipsoid);
-    if (t <= 0.0) { discard; }
-
-    let hit = ray.origin + t * ray.direction;
-    let clip = camera.view_projection * vec4f(hit, 1.0);
-    let depth = clip.z / clip.w;
-    if (clip.w <= 0.0 || depth < 0.0 || depth > 1.0) { discard; }
-
-    var output: FSOutput;
-    output.color = vec4f(input.color, 1.0);
-    output.depth = depth;
-    return output;
+@fragment fn fs_main(input: VSOutput) -> @location(0) vec4f {
+    let p = input.offset;
+    let q = input.conic.x * p.x * p.x + 2.0 * input.conic.y * p.x * p.y + input.conic.z * p.y * p.y;
+    if (q > 9.0) { discard; }
+    let alpha = min(0.99, input.color.a * exp(-0.5 * q));
+    if (alpha < 1.0 / 255.0) { discard; }
+    return vec4f(input.color.rgb * alpha, alpha);
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 #include <Eigen/Core>
 
 struct Gaussian {
@@ -8,3 +10,5 @@ struct Gaussian {
     Eigen::Vector4f rotation;
     Eigen::Vector4f color;
 };
+
+std::vector<Gaussian> readPlyFile(const char* path);

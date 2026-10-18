@@ -1,0 +1,4 @@
+device: NVIDIA GeForce RTX 4090
+description: NVIDIA: 580.159.03 580.159.3.0
+backend enum: 6
+64 samples, 16 warmup passes, 3 shuffled trials; timestamp_quantization disabled

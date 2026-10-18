@@ -1,0 +1,13 @@
+# gpu         pid   type     sm    mem    enc    dec    jpg    ofa    command 
+# Idx           #    C/G      %      %      %      %      %      %    name 
+    0       3324     G      -      -      -      -      -      -    gnome-shell    
+    0       3869     G      -      -      -      -      -      -    Xwayland       
+    0     166309     C      -      -      -      -      -      -    python         
+    0     698797     C      -      -      -      -      -      -    python         
+    0     725530     C     21      0     18      -      -      -    sunshine       
+    0     731068     C      -      -      -      -      -      -    python         
+    0    1095096   C+G      -      -      -      -      -      -    nautilus       
+    0    1432708     C      -      -      -      -      -      -    python         
+    0    1486537     C      -      -      -      -      -      -    python         
+    0    1490136   C+G      -      -      -      -      -      -    chrome --type=g
+    0    2009723   C+G      -      -      -      -      -      -    ellipsoid      

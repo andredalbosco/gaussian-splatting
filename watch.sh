@@ -15,14 +15,14 @@ stop_app() {
 trap stop_app EXIT
 trap 'exit 0' INT TERM
 
-echo "Watching src/, assets/, and CMakeLists.txt. Ctrl+C to stop."
+echo "Watching src/, assets/, and CMake files. Ctrl+C to stop."
 
 while true; do
-    current=$(find src assets -type f -exec cksum {} +; cksum CMakeLists.txt)
+    current=$(find src assets -type f -exec cksum {} +; cksum CMakeLists.txt CMakePresets.json)
     if [[ "$current" != "$previous" ]]; then
         previous=$current
-        if cmake -S . -B build -DCMAKE_BUILD_TYPE=Release &&
-            cmake --build build --target gaussian_splatting -j 8; then
+        if cmake --preset default &&
+            cmake --build --preset default --target gaussian_splatting -j 8; then
             stop_app
             ./build/gaussian_splatting &
             app_pid=$!

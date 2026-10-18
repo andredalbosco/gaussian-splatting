@@ -1,0 +1,2 @@
+name, driver_version, utilization.gpu [%], temperature.gpu, power.draw [W], clocks.current.graphics [MHz], clocks.current.memory [MHz]
+NVIDIA GeForce RTX 4090, 580.159.03, 22 %, 33, 82.85 W, 2625 MHz, 10251 MHz
