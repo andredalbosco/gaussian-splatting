@@ -1,3 +1,9 @@
 [submodule "external/dawn"]
 	path = external/dawn
 	url = https://dawn.googlesource.com/dawn
+[submodule "external/eigen"]
+	path = external/eigen
+	url = https://gitlab.com/libeigen/eigen.git
+[submodule "external/imgui"]
+	path = external/imgui
+	url = https://github.com/ocornut/imgui.git

@@ -12,6 +12,9 @@ Keep the code as lean as possible.
 - Avoid unnecessary abstractions, helper functions, and comments.
 - Avoid modifying code not directly/strictly related to your task.
 
+- Order function arguments as: owning context (instance/device), resource being operated on, inputs/options, then output references. For surface configuration, use device, adapter, surface, window.
+- Keep short parameter lists on one line; stack longer lists with one parameter per line.
+
 ## References
 
 - Reference materials may be stored under `/references` and consulted while working.
