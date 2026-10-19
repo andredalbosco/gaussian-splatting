@@ -1,5 +1,6 @@
 #include "camera.hpp"
 #include "gaussian.hpp"
+#include "radix_validation.hpp"
 #include "glfw_utils.hpp"
 #include "wgpu_utils.hpp"
 
@@ -17,6 +18,9 @@ int main() {
     auto device = requestDevice(instance, adapter);
     auto queue = device.GetQueue();
     auto shader = readWgslFile(device, SRC_DIR "/shaders.wgsl");
+    RadixValidation radixSort;
+    radixSort.device = device;
+    radixSort.createRadixPipelines(shader);
     wgpu::BlendState blend {
         .color = {.srcFactor = wgpu::BlendFactor::One, .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
         .alpha = {.srcFactor = wgpu::BlendFactor::One, .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
@@ -64,7 +68,6 @@ int main() {
         queue.WriteBuffer(shapeBuffer, 0, shapes.data(), bufferDesc.size);
         bufferDesc.size = order.size() * sizeof(uint32_t);
         auto orderBuffer = device.CreateBuffer(&bufferDesc);
-        queue.WriteBuffer(orderBuffer, 0, order.data(), bufferDesc.size);
         bufferDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
         bufferDesc.size = 144;
         auto cameraBuffer = device.CreateBuffer(&bufferDesc);
@@ -72,6 +75,11 @@ int main() {
         queue.WriteBuffer(cameraBuffer, 0, vp.data(), 64);
         queue.WriteBuffer(cameraBuffer, 64, view.data(), 64);
         queue.WriteBuffer(cameraBuffer, 128, viewport.data(), 16);
+        radixSort.gaussianBuffer = shapeBuffer;
+        radixSort.cameraBuffer = cameraBuffer;
+        radixSort.orderBuffer = orderBuffer;
+        radixSort.gaussianCount = shapes.size();
+        radixSort.createRadixBuffers();
         wgpu::BindGroupEntry entries[] {
             {.binding = 0, .buffer = shapeBuffer, .size = shapeBuffer.GetSize()},
             {.binding = 1, .buffer = cameraBuffer, .size = cameraBuffer.GetSize()},
@@ -86,6 +94,7 @@ int main() {
                                               .storeOp = wgpu::StoreOp::Store, .clearValue = {0, 0, 0, 0}};
         wgpu::RenderPassDescriptor passDesc {.colorAttachmentCount = 1, .colorAttachments = &color};
         auto encoder = device.CreateCommandEncoder();
+        radixSort.recordRadix(encoder);
         auto pass = encoder.BeginRenderPass(&passDesc);
         pass.SetPipeline(pipeline);
         pass.SetBindGroup(0, group);

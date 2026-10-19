@@ -4,8 +4,8 @@
 #include "wgpu_utils.hpp"
 
 #include <algorithm>
+#include <array>
 #include <iostream>
-#include <numeric>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -15,52 +15,85 @@
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 
-struct GSplatApp : App {
-    wgpu::RenderPipeline pipeline;
-    wgpu::BindGroup bindGroup;
+constexpr uint32_t radixWorkgroupSize = 256;
+constexpr uint32_t radixBitsPerPass = 4;
+constexpr uint32_t radixDigitCount = 1u << radixBitsPerPass;
+constexpr uint32_t radixPassCount = 32 / radixBitsPerPass;
+constexpr uint32_t radixUniformStride = 256;
+
+struct RadixParams {
+    uint32_t count;
+    uint32_t groupCount;
+    uint32_t blockCount;
+    uint32_t bitShift;
+};
+
+struct GaussianSplattingApp : App {
+    wgpu::RenderPipeline renderPipeline;
+    wgpu::ComputePipeline radixHistogramRankPipeline;
+    wgpu::ComputePipeline radixScanBlocksPipeline;
+    wgpu::ComputePipeline radixScanSumsPipeline;
+    wgpu::ComputePipeline radixScatterPipeline;
+
+    wgpu::BindGroup renderBindGroup;
+    wgpu::BindGroup radixHistogramBindGroup;
+    wgpu::BindGroup radixScanBlocksBindGroup;
+    wgpu::BindGroup radixScanSumsBindGroup;
+    wgpu::BindGroup radixScatterBindGroup;
+
+    std::array<wgpu::BindGroup, radixPassCount> radixHistogramBindGroups;
+    std::array<wgpu::BindGroup, radixPassCount> radixScanBlocksBindGroups;
+    std::array<wgpu::BindGroup, radixPassCount> radixScanSumsBindGroups;
+    std::array<wgpu::BindGroup, radixPassCount> radixScatterBindGroups;
 
     wgpu::Buffer gaussianBuffer;
     wgpu::Buffer orderBuffer;
     wgpu::Buffer cameraBuffer;
+    wgpu::Buffer radixParamsBuffer;
+    wgpu::Buffer radixHistogramBuffer;
+    wgpu::Buffer radixBlockOffsetsBuffer;
+    wgpu::Buffer radixLocalRanksBuffer;
+    std::array<wgpu::Buffer, 2> radixKeysBuffer;
 
     std::vector<Gaussian> gaussians;
-    uint32_t gaussianCount;
     Eigen::AlignedBox3f bounds;
-
-    std::vector<uint32_t> order;
-    std::vector<float> depths;
     Eigen::Vector3f lastSortDirection = Eigen::Vector3f::Zero();
+    Eigen::Vector2d mouse = Eigen::Vector2d::Zero();
     OrbitCamera camera;
 
-    Eigen::Vector2d mouse = Eigen::Vector2d::Zero();
+    uint32_t gaussianCount;
+    uint32_t radixGroupCount;
+    uint32_t radixBlockCount;
     float scrollDelta = 0;
 
     bool init();
 
     bool loadGaussians(const char* path);
 
-    void createPipeline();
+    void createPipelines();
     void createBuffers();
-    void createBindGroup();
+    void createBindGroups();
+
+    void recordRadixSort(const wgpu::CommandEncoder& encoder, const wgpu::PassTimestampWrites* timestamps = nullptr) const;
 
     void update() override;
     void buildUi() override;
     void recordCommands(const wgpu::CommandEncoder& encoder, const wgpu::TextureView& target) override;
 
     void resetCamera();
-    void updateCamera();
+    void updateCameraBuffer();
 
     void handleInput();
     void onScroll(double x, double y) override;
 };
 
-bool GSplatApp::init() {
+bool GaussianSplattingApp::init() {
     if (!App::init("Gaussian Splatting")) return false;
-    createPipeline();
+    createPipelines();
     return true;
 }
 
-bool GSplatApp::loadGaussians(const char* path) {
+bool GaussianSplattingApp::loadGaussians(const char* path) {
     auto newGaussians = readPlyFile(path);
     if (newGaussians.empty()) return false;
     gaussians = std::move(newGaussians);
@@ -73,14 +106,13 @@ bool GSplatApp::loadGaussians(const char* path) {
         bounds.extend(gaussian.position.head<3>());
     }
     resetCamera();
-    lastSortDirection.setZero();
     createBuffers();
-    createBindGroup();
+    createBindGroups();
 
     return true;
 }
 
-void GSplatApp::createPipeline() {
+void GaussianSplattingApp::createPipelines() {
     wgpu::ShaderModule shader = readWgslFile(device, SRC_DIR "/shaders.wgsl");
 
     wgpu::BlendState blend {
@@ -110,10 +142,34 @@ void GSplatApp::createPipeline() {
         },
         .fragment = &fragment,
     };
-    pipeline = device.CreateRenderPipeline(&pipelineDesc);
+    renderPipeline = device.CreateRenderPipeline(&pipelineDesc);
+
+    wgpu::ComputePipelineDescriptor histogramRankDesc {
+        .label = "radix_histogram_rank",
+        .compute = {.module = shader, .entryPoint = "radix_histogram_rank"},
+    };
+    radixHistogramRankPipeline = device.CreateComputePipeline(&histogramRankDesc);
+
+    wgpu::ComputePipelineDescriptor scanBlocksDesc {
+        .label = "radix_scan_blocks",
+        .compute = {.module = shader, .entryPoint = "radix_scan_blocks"},
+    };
+    radixScanBlocksPipeline = device.CreateComputePipeline(&scanBlocksDesc);
+
+    wgpu::ComputePipelineDescriptor scanSumsDesc {
+        .label = "radix_scan_sums",
+        .compute = {.module = shader, .entryPoint = "radix_scan_sums"},
+    };
+    radixScanSumsPipeline = device.CreateComputePipeline(&scanSumsDesc);
+
+    wgpu::ComputePipelineDescriptor scatterDesc {
+        .label = "radix_scatter",
+        .compute = {.module = shader, .entryPoint = "radix_scatter"},
+    };
+    radixScatterPipeline = device.CreateComputePipeline(&scatterDesc);
 }
 
-void GSplatApp::createBuffers() {
+void GaussianSplattingApp::createBuffers() {
     wgpu::BufferDescriptor gaussianBufferDesc {
         .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst,
         .size = gaussians.size() * sizeof(Gaussian),
@@ -121,12 +177,8 @@ void GSplatApp::createBuffers() {
     gaussianBuffer = device.CreateBuffer(&gaussianBufferDesc);
     queue.WriteBuffer(gaussianBuffer, 0, gaussians.data(), gaussianBufferDesc.size);
 
-    order.resize(gaussianCount);
-    depths.resize(gaussianCount);
-    std::iota(order.begin(), order.end(), 0u);
-
     wgpu::BufferDescriptor orderBufferDesc {
-        .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst,
+        .usage = wgpu::BufferUsage::Storage,
         .size = gaussianCount * sizeof(uint32_t),
     };
     orderBuffer = device.CreateBuffer(&orderBufferDesc);
@@ -136,9 +188,54 @@ void GSplatApp::createBuffers() {
         .size = 2 * sizeof(Eigen::Matrix4f) + sizeof(Eigen::Vector4f),
     };
     cameraBuffer = device.CreateBuffer(&cameraBufferDesc);
+
+    radixGroupCount = (gaussianCount + radixWorkgroupSize - 1) / radixWorkgroupSize;
+    radixBlockCount = (radixGroupCount + radixWorkgroupSize - 1) / radixWorkgroupSize;
+
+    wgpu::BufferDescriptor keysBufferDesc {
+        .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc,
+        .size = std::max<uint64_t>(16, uint64_t(gaussianCount) * 2 * sizeof(uint32_t)),
+    };
+    radixKeysBuffer[0] = device.CreateBuffer(&keysBufferDesc);
+    radixKeysBuffer[1] = device.CreateBuffer(&keysBufferDesc);
+
+    wgpu::BufferDescriptor localRanksBufferDesc {
+        .usage = wgpu::BufferUsage::Storage,
+        .size = std::max<uint64_t>(16, uint64_t(gaussianCount) * sizeof(uint32_t)),
+    };
+    radixLocalRanksBuffer = device.CreateBuffer(&localRanksBufferDesc);
+
+    wgpu::BufferDescriptor histogramBufferDesc {
+        .usage = wgpu::BufferUsage::Storage,
+        .size = std::max<uint64_t>(16, uint64_t(radixDigitCount) * radixGroupCount * sizeof(uint32_t)),
+    };
+    radixHistogramBuffer = device.CreateBuffer(&histogramBufferDesc);
+
+    wgpu::BufferDescriptor blockOffsetsBufferDesc {
+        .usage = wgpu::BufferUsage::Storage,
+        .size = std::max<uint64_t>(16, uint64_t(radixDigitCount) * radixBlockCount * sizeof(uint32_t)),
+    };
+    radixBlockOffsetsBuffer = device.CreateBuffer(&blockOffsetsBufferDesc);
+
+    wgpu::BufferDescriptor paramsBufferDesc {
+        .usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
+        .size = radixPassCount * radixUniformStride,
+    };
+    radixParamsBuffer = device.CreateBuffer(&paramsBufferDesc);
+
+    for (uint32_t passIndex = 0; passIndex < radixPassCount; passIndex++) {
+        RadixParams radixParams {
+            .count = gaussianCount,
+            .groupCount = radixGroupCount,
+            .blockCount = radixBlockCount,
+            .bitShift = passIndex * radixBitsPerPass,
+        };
+        device.GetQueue().WriteBuffer(radixParamsBuffer, passIndex * radixUniformStride, &radixParams, sizeof(radixParams));
+    }
+    lastSortDirection.setZero();
 }
 
-void GSplatApp::createBindGroup() {
+void GaussianSplattingApp::createBindGroups() {
     wgpu::BindGroupEntry entries[] {
         {
             .binding = 0,
@@ -158,19 +255,123 @@ void GSplatApp::createBindGroup() {
     };
 
     wgpu::BindGroupDescriptor bindGroupDesc {
-        .layout = pipeline.GetBindGroupLayout(0),
+        .layout = renderPipeline.GetBindGroupLayout(0),
         .entryCount = 3,
         .entries = entries,
     };
-    bindGroup = device.CreateBindGroup(&bindGroupDesc);
+    renderBindGroup = device.CreateBindGroup(&bindGroupDesc);
+
+    wgpu::BindGroupEntry histogramInputEntries[] {
+        {.binding = 0, .buffer = gaussianBuffer, .size = gaussianBuffer.GetSize()},
+        {.binding = 1, .buffer = cameraBuffer, .size = cameraBuffer.GetSize()},
+    };
+    wgpu::BindGroupDescriptor histogramBindGroupDesc {
+        .layout = radixHistogramRankPipeline.GetBindGroupLayout(0),
+        .entryCount = 2,
+        .entries = histogramInputEntries,
+    };
+    radixHistogramBindGroup = device.CreateBindGroup(&histogramBindGroupDesc);
+
+    wgpu::BindGroupDescriptor scanBlocksBindGroupDesc {
+        .layout = radixScanBlocksPipeline.GetBindGroupLayout(0),
+    };
+    radixScanBlocksBindGroup = device.CreateBindGroup(&scanBlocksBindGroupDesc);
+
+    wgpu::BindGroupDescriptor scanSumsBindGroupDesc {
+        .layout = radixScanSumsPipeline.GetBindGroupLayout(0),
+    };
+    radixScanSumsBindGroup = device.CreateBindGroup(&scanSumsBindGroupDesc);
+
+    wgpu::BindGroupDescriptor scatterBindGroupDesc {
+        .layout = radixScatterPipeline.GetBindGroupLayout(0),
+    };
+    radixScatterBindGroup = device.CreateBindGroup(&scatterBindGroupDesc);
+
+    wgpu::Buffer sourceBuffer = radixKeysBuffer[0];
+    wgpu::Buffer destinationBuffer = radixKeysBuffer[1];
+    for (uint32_t passIndex = 0; passIndex < radixPassCount; passIndex++) {
+        wgpu::Buffer histogramInputBuffer = sourceBuffer;
+        wgpu::Buffer histogramOutputBuffer = destinationBuffer;
+        if (passIndex == 0) {
+            histogramInputBuffer = destinationBuffer;
+            histogramOutputBuffer = sourceBuffer;
+        }
+
+        wgpu::BindGroupEntry paramsEntry {
+            .binding = 0,
+            .buffer = radixParamsBuffer,
+            .offset = passIndex * radixUniformStride,
+            .size = sizeof(RadixParams),
+        };
+
+        wgpu::BindGroupEntry histogramEntries[] {
+            paramsEntry,
+            {.binding = 1, .buffer = histogramInputBuffer, .size = histogramInputBuffer.GetSize()},
+            {.binding = 2, .buffer = histogramOutputBuffer, .size = histogramOutputBuffer.GetSize()},
+            {.binding = 3, .buffer = radixHistogramBuffer, .size = radixHistogramBuffer.GetSize()},
+            {.binding = 5, .buffer = radixLocalRanksBuffer, .size = radixLocalRanksBuffer.GetSize()},
+        };
+        wgpu::BindGroupDescriptor histogramDesc {
+            .layout = radixHistogramRankPipeline.GetBindGroupLayout(1),
+            .entryCount = 5,
+            .entries = histogramEntries,
+        };
+        radixHistogramBindGroups[passIndex] = device.CreateBindGroup(&histogramDesc);
+
+        wgpu::BindGroupEntry scanBlocksEntries[] {
+            paramsEntry,
+            {.binding = 3, .buffer = radixHistogramBuffer, .size = radixHistogramBuffer.GetSize()},
+            {.binding = 4, .buffer = radixBlockOffsetsBuffer, .size = radixBlockOffsetsBuffer.GetSize()},
+        };
+        wgpu::BindGroupDescriptor scanBlocksDesc {
+            .layout = radixScanBlocksPipeline.GetBindGroupLayout(1),
+            .entryCount = 3,
+            .entries = scanBlocksEntries,
+        };
+        radixScanBlocksBindGroups[passIndex] = device.CreateBindGroup(&scanBlocksDesc);
+
+        wgpu::BindGroupEntry scanSumsEntries[] {
+            paramsEntry,
+            {.binding = 4, .buffer = radixBlockOffsetsBuffer, .size = radixBlockOffsetsBuffer.GetSize()},
+        };
+        wgpu::BindGroupDescriptor scanSumsDesc {
+            .layout = radixScanSumsPipeline.GetBindGroupLayout(1),
+            .entryCount = 2,
+            .entries = scanSumsEntries,
+        };
+        radixScanSumsBindGroups[passIndex] = device.CreateBindGroup(&scanSumsDesc);
+
+        wgpu::BindGroupEntry scatterEntries[] {
+            paramsEntry,
+            {.binding = 1, .buffer = sourceBuffer, .size = sourceBuffer.GetSize()},
+            {.binding = 2, .buffer = destinationBuffer, .size = destinationBuffer.GetSize()},
+            {.binding = 3, .buffer = radixHistogramBuffer, .size = radixHistogramBuffer.GetSize()},
+            {.binding = 4, .buffer = radixBlockOffsetsBuffer, .size = radixBlockOffsetsBuffer.GetSize()},
+            {.binding = 5, .buffer = radixLocalRanksBuffer, .size = radixLocalRanksBuffer.GetSize()},
+            {.binding = 6, .buffer = orderBuffer, .size = orderBuffer.GetSize()},
+        };
+        wgpu::BindGroupDescriptor scatterDesc {
+            .layout = radixScatterPipeline.GetBindGroupLayout(1),
+            .entryCount = 7,
+            .entries = scatterEntries,
+        };
+        radixScatterBindGroups[passIndex] = device.CreateBindGroup(&scatterDesc);
+
+        std::swap(sourceBuffer, destinationBuffer);
+    }
 }
 
-void GSplatApp::update() {
+void GaussianSplattingApp::update() {
     handleInput();
-    updateCamera();
+    updateCameraBuffer();
 }
 
-void GSplatApp::recordCommands(const wgpu::CommandEncoder& encoder, const wgpu::TextureView& target) {
+void GaussianSplattingApp::recordCommands(const wgpu::CommandEncoder& encoder, const wgpu::TextureView& target) {
+    Eigen::Vector3f direction = (camera.center - camera.position()).normalized();
+    if ((direction - lastSortDirection).squaredNorm() != 0) {
+        recordRadixSort(encoder);
+        lastSortDirection = direction;
+    }
     wgpu::RenderPassColorAttachment color {
         .view = target,
         .loadOp = wgpu::LoadOp::Clear,
@@ -182,13 +383,13 @@ void GSplatApp::recordCommands(const wgpu::CommandEncoder& encoder, const wgpu::
         .colorAttachments = &color,
     };
     wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&passDesc);
-    pass.SetPipeline(pipeline);
-    pass.SetBindGroup(0, bindGroup);
+    pass.SetPipeline(renderPipeline);
+    pass.SetBindGroup(0, renderBindGroup);
     pass.Draw(4, gaussianCount);
     pass.End();
 }
 
-void GSplatApp::buildUi() {
+void GaussianSplattingApp::buildUi() {
     float uiScale = ImGui::GetStyle().FontScaleDpi;
     ImGui::SetNextWindowPos({12 * uiScale, 12 * uiScale}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({340 * uiScale, 480 * uiScale}, ImGuiCond_FirstUseEver);
@@ -225,7 +426,7 @@ void GSplatApp::buildUi() {
     ImGui::End();
 }
 
-void GSplatApp::resetCamera() {
+void GaussianSplattingApp::resetCamera() {
     float radius = 0.5f * bounds.sizes().maxCoeff();
     camera.center = bounds.center();
     camera.distance = 3.5f * radius;
@@ -235,7 +436,7 @@ void GSplatApp::resetCamera() {
     camera.pitch = 5;
 }
 
-void GSplatApp::updateCamera() {
+void GaussianSplattingApp::updateCameraBuffer() {
     Eigen::Matrix4f view = viewMatrix(camera.position(), camera.center, Eigen::Vector3f::UnitY());
     Eigen::Matrix4f projection = projectionMatrix(
         camera.fovy, float(surfaceConfig.width) / surfaceConfig.height, camera.zNear, camera.zFar);
@@ -247,19 +448,9 @@ void GSplatApp::updateCamera() {
     queue.WriteBuffer(cameraBuffer, 0, viewProjection.data(), sizeof(viewProjection));
     queue.WriteBuffer(cameraBuffer, sizeof(viewProjection), view.data(), sizeof(view));
     queue.WriteBuffer(cameraBuffer, sizeof(viewProjection) + sizeof(view), viewport.data(), sizeof(viewport));
-
-    Eigen::Vector3f direction = (camera.center - camera.position()).normalized();
-    if ((direction - lastSortDirection).squaredNorm() == 0) return;
-    lastSortDirection = direction;
-    for (uint32_t i = 0; i < gaussianCount; i++)
-        depths[i] = direction.dot(gaussians[i].position.head<3>());
-    std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
-        return depths[a] == depths[b] ? a < b : depths[a] > depths[b];
-    });
-    queue.WriteBuffer(orderBuffer, 0, order.data(), order.size() * sizeof(uint32_t));
 }
 
-void GSplatApp::handleInput() {
+void GaussianSplattingApp::handleInput() {
     Eigen::Vector2d position;
     glfwGetCursorPos(window, &position.x(), &position.y());
 
@@ -274,12 +465,39 @@ void GSplatApp::handleInput() {
     mouse = position;
 }
 
-void GSplatApp::onScroll(double, double y) {
+void GaussianSplattingApp::onScroll(double, double y) {
     scrollDelta += static_cast<float>(y);
 }
 
+void GaussianSplattingApp::recordRadixSort(const wgpu::CommandEncoder& encoder, const wgpu::PassTimestampWrites* timestamps) const {
+    wgpu::ComputePassDescriptor desc {.timestampWrites = timestamps};
+    auto pass = encoder.BeginComputePass(&desc);
+    for (uint32_t digit = 0; digit < radixPassCount; digit++) {
+        pass.SetPipeline(radixHistogramRankPipeline);
+        pass.SetBindGroup(0, radixHistogramBindGroup);
+        pass.SetBindGroup(1, radixHistogramBindGroups[digit]);
+        pass.DispatchWorkgroups(radixGroupCount);
+
+        pass.SetPipeline(radixScanBlocksPipeline);
+        pass.SetBindGroup(0, radixScanBlocksBindGroup);
+        pass.SetBindGroup(1, radixScanBlocksBindGroups[digit]);
+        pass.DispatchWorkgroups(radixBlockCount, radixDigitCount);
+
+        pass.SetPipeline(radixScanSumsPipeline);
+        pass.SetBindGroup(0, radixScanSumsBindGroup);
+        pass.SetBindGroup(1, radixScanSumsBindGroups[digit]);
+        pass.DispatchWorkgroups(1);
+
+        pass.SetPipeline(radixScatterPipeline);
+        pass.SetBindGroup(0, radixScatterBindGroup);
+        pass.SetBindGroup(1, radixScatterBindGroups[digit]);
+        pass.DispatchWorkgroups(radixGroupCount);
+    }
+    pass.End();
+}
+
 int main(int argc, char* argv[]) {
-    static GSplatApp app {};
+    static GaussianSplattingApp app {};
     if (!app.init()) return 1;
     if (!app.loadGaussians(SRC_DIR "/../assets/luigi.ply")) {
         app.shutdown();

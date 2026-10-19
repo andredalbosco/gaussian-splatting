@@ -4,7 +4,7 @@ Gaussian splatting using WebGPU through Dawn.
 The math and rendering stages are explained in [docs/gaussian_splatting.md](docs/gaussian_splatting.md).
 `src/main.cpp` loads Luigi and renders Gaussian quads using `src/shaders.wgsl`.
 Experimental renderers and benchmarks live in `experiments/`.
-`GSplatApp` derives from `App` in `src/app.hpp` and `src/app.cpp`, which handles window/device setup,
+`GaussianSplattingApp` derives from `App` in `src/app.hpp` and `src/app.cpp`, which handles window/device setup,
 the frame loop, UI frames, and presentation. GLFW, ImGui, and WebGPU helpers live in
 `src/glfw_utils.cpp`, `src/imgui_utils.cpp`, and `src/wgpu_utils.cpp`; general helpers stay in `src/utils.cpp`.
 Orbit camera and view/projection math live in `src/camera.hpp` and `src/camera.cpp`.
@@ -36,7 +36,7 @@ Drag with the left mouse button to orbit, and scroll to zoom.
 The window can be resized; close it to exit.
 Dear ImGui 1.93.0 provides a live camera panel with FOV, clipping planes, orbit/zoom sensitivity,
 angles, explicit world-space distance limits, and a reset button. UI interaction captures the mouse.
-Scene bounds and initial framing are computed by `GSplatApp`; `OrbitCamera` only handles camera state and controls.
+Scene bounds and initial framing are computed by `GaussianSplattingApp`; `OrbitCamera` only handles camera state and controls.
 `--capture` renders one frame and exits.
 
 ## Browser build
@@ -63,14 +63,18 @@ For remote hosting, serve over HTTPS.
 including position, SH DC color, opacity, logarithmic scale, and quaternion rotation.
 
 Each Gaussian is drawn with a four-vertex triangle strip. The vertex shader projects its
-three scaled, rotated axes through the view-projection differential, then forms the 2D
-covariance as `B * transpose(B)`. Covariance is measured in pixels, with 0.3 pixel² added
-to each diagonal to filter tiny footprints. An axis-aligned quad encloses the 3-sigma ellipse.
+three scaled, rotated axes with an explicit perspective Jacobian, then forms the 2D
+covariance as `B * transpose(B)` in clip-space footprint units. The `cov_blur` filter
+adds 0.3 pixel² of diagonal variance, converted to clip units. An axis-aligned quad encloses
+the 3-sigma ellipse, and its offsets are added directly to the clip-space center.
 The fragment shader evaluates `opacity * exp(-0.5 * q)` using the inverse covariance,
 truncates at 3 sigma, caps alpha at 0.99, and discards contributions below 1/255.
 
-The CPU sorts Gaussian centers by camera-space depth, far to near, when the view direction
-changes. Only the sorted index buffer is uploaded; Gaussian data stays on the GPU.
+Compute shaders sort Gaussian indices by signed center depth, far to near, when the view
+direction changes. `GaussianSplattingApp::recordRadixSort` in `src/main.cpp` records eight stable four-bit radix passes before the render pass.
+The first histogram generates depth keys; the final scatter writes sorted indices directly. Equal depths retain
+source-index order. The GPU writes the `order` buffer directly; there is no CPU sort,
+sorted-index upload, or readback in the viewer.
 Premultiplied-alpha blending composites the splats without depth writes or a depth attachment.
 Center-depth ordering is an approximation for overlapping extended Gaussians.
 Colors are fixed RGB decoded from the PLY's DC coefficients; no view-dependent spherical
@@ -87,8 +91,29 @@ cmake --build build --target validate_splats -j 12
 VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json ./build/validate_splats
 ```
 
-The five cases pass with at most 1/255 channel error. Native builds and live rendering were
-verified on the RTX 4090; the browser build was not exercised for this change.
+The six cases use GPU-generated order and pass with at most 1/255 channel error.
+The validators exercise the current shader through the headless harness in
+`experiments/radix_validation.hpp`. Native validation and a one-frame main-app run pass
+on the RTX 4090; the Emscripten build also passes. Browser runtime was not rechecked
+after the radix fusion.
+
+## GPU radix-sort validation
+
+The compute implementation uses workgroup bitmaps for stable local ranks and hierarchical
+histogram prefixes; it does not require subgroups. Signed float depth keys preserve
+far-to-near ordering, and positive/negative zero share a key. Scene reloads rebuild the
+sort buffers and invalidate the cached order.
+
+```sh
+cmake --build build --target validate_radix_sort -j 8
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json ./build/validate_radix_sort
+```
+
+The validation checks CPU-reference index order, equal-depth stability, signed depths,
+rotated cameras, repeated sorting, and counts crossing workgroup/prefix boundaries up to
+1,048,577 Gaussians. Optional timing results are written when an output directory is supplied;
+see [the initial sort comparison](experiments/results/2026-10-19-radix/REPORT.md)
+and [the fusion comparison](experiments/results/2026-10-19-radix-fusion/report.md).
 
 ## Ellipsoid experiment
 

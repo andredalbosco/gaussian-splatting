@@ -6,7 +6,7 @@ an elliptical footprint on the image. The vertex shader computes its projected s
 the fragment shader evaluates its opacity; blending combines it with the other splats.
 
 The current implementation loads Luigi, uses fixed per-Gaussian RGB colors, and sorts
-Gaussian centers on the CPU. It does not evaluate view-dependent spherical harmonics.
+Gaussian centers on the GPU. It does not evaluate view-dependent spherical harmonics.
 
 ## 1. Data representation
 
@@ -210,15 +210,24 @@ peak contribution, rather than requiring each splat's integral to equal one.
 
 ## 7. Sorting and blending
 
-Transparent contributions depend on their order. [`GSplatApp::updateCamera`](../src/main.cpp)
-computes a center-depth key for each Gaussian and sorts indices from far to near. The key
-can use $f\cdot\mu$, where $f$ is the camera's forward direction: subtracting the camera
-position would add the same constant to every key and would not change the order.
+Transparent contributions depend on their order. `GaussianSplattingApp::recordRadixSort` records a compute
+pass before the render pass. It generates a center-depth key for each Gaussian using
+$f\cdot\mu$, where $f$ is the camera's forward direction, then sorts indices from far to
+near. Subtracting the camera position would add the same constant to every depth and
+would not change their order.
 
-The Gaussian storage buffer remains unchanged. The viewer uploads the sorted indices,
-and the vertex shader fetches `gaussians[order[instance_index]]`. Sorting is reused while
-the view direction stays unchanged; FOV, resize, and translation along the orbit direction
-do not change the mathematical depth order.
+Signed float depths are converted to unsigned keys by flipping the sign bit for
+nonnegative values and complementing negative values, then complementing the result for
+descending depth order. Signed zero is canonicalized. Eight stable four-bit passes use
+workgroup membership bitmaps, hierarchical histogram prefixes, and scatter into alternating
+key/index buffers. The first histogram also generates keys, and the final scatter writes
+indices directly into `order`, for 32 dispatches across four compute pipelines.
+
+The Gaussian storage buffer remains unchanged. Compute writes the sorted indices directly,
+and the vertex shader fetches `gaussians[order[instance_index]]`. No CPU sort, sorted-index
+upload, or GPU readback is needed. `GaussianSplattingApp::recordCommands` compares the view direction with the last sorted
+direction and records a sort when it changes; rebuilding buffers resets the cached direction.
+FOV, resize, and translation along the orbit direction preserve the mathematical depth order.
 
 Premultiplied-alpha blending uses
 
@@ -260,14 +269,14 @@ projected quad at the image edges.
 | [`src/wgpu_utils.cpp`](../src/wgpu_utils.cpp) | Device, surface, resizing, and shader loading |
 | [`src/utils.cpp`](../src/utils.cpp) | General file loading |
 | [`src/camera.cpp`](../src/camera.cpp) | View and perspective matrices |
-| [`src/main.cpp`](../src/main.cpp) | Gaussian buffers, sorting, draw commands, blending, controls |
-| [`src/shaders.wgsl`](../src/shaders.wgsl) | Projected covariance, quad, Gaussian evaluation |
+| [`src/main.cpp`](../src/main.cpp) | Gaussian application, radix sorting, draw commands, controls, and program entry point |
+| [`src/shaders.wgsl`](../src/shaders.wgsl) | GPU radix sort, projected covariance, quad, Gaussian evaluation |
 | [`experiments/validate_splats.cpp`](../experiments/validate_splats.cpp) | Native numerical shader checks |
 
 `App` owns the window, device, frame loop, and presentation. Its `frame()` calls
 `buildUi()`, `update()`, and `recordCommands(encoder, target)` on the derived app. The derived app
 records its render passes, then `App` draws ImGui in a separate pass that loads the
-existing target contents. `GSplatApp::init()` initializes
+existing target contents. `GaussianSplattingApp::init()` initializes
 the base app and Gaussian pipeline without loading any Gaussians.
 `main()` loads the initial Gaussians with `loadGaussians(path)`, then calls the argument-free
 `run()` to start the frame loop. A later `loadGaussians(path)`
@@ -277,7 +286,7 @@ and invalidates the cached sort direction so the next frame sorts the new scene.
 The validation program compares GPU output with a CPU reference that estimates the
 projection differential using finite differences. It checks single-splat falloff, a known
 two-layer blend, rotated anisotropic splats, an off-axis center, a non-square viewport,
-and behind/near/far rejection. The five cases passed with at most 1/255 channel error
+and behind/near/far rejection. The six cases consume the GPU-generated order and passed with at most 1/255 channel error
 on the local RTX 4090.
 
 ```sh
