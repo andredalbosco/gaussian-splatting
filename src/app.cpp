@@ -30,11 +30,11 @@ bool App::init(const char* title, int width, int height) {
 void App::run() {
 #ifdef __EMSCRIPTEN__
     emscripten_set_main_loop_arg([](void* arg) {
-        static_cast<App*>(arg)->drawFrame();
+        static_cast<App*>(arg)->frame();
     }, this, 0, false);
 #else
     while (!glfwWindowShouldClose(window)) {
-        drawFrame();
+        frame();
     }
     shutdown();
 #endif
@@ -46,14 +46,14 @@ void App::shutdown() {
     shutdownGlfw(window);
 }
 
-void App::drawFrame() {
+void App::frame() {
     glfwPollEvents();
     if (!handleWindowResize(surface, window, surfaceConfig)) return;
 
     ImGui_ImplWGPU_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
-    drawUi();
+    buildUi();
     update();
     ImGui::Render();
 
@@ -63,7 +63,7 @@ void App::drawFrame() {
 
     wgpu::TextureView target = frame.texture.CreateView();
     wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
-    draw(encoder, target);
+    recordCommands(encoder, target);
 
     wgpu::RenderPassColorAttachment color {
         .view = target,

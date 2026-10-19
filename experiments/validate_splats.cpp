@@ -16,7 +16,7 @@ int main() {
     auto adapter = requestAdapter(instance, {});
     auto device = requestDevice(instance, adapter);
     auto queue = device.GetQueue();
-    auto shader = readWgslFile(device, SOURCE_DIR "/src/shaders.wgsl");
+    auto shader = readWgslFile(device, SRC_DIR "/shaders.wgsl");
     wgpu::BlendState blend {
         .color = {.srcFactor = wgpu::BlendFactor::One, .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
         .alpha = {.srcFactor = wgpu::BlendFactor::One, .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},

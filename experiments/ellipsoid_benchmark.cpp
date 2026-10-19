@@ -160,7 +160,7 @@ int main(int argc, char* argv[]) {
     auto future = adapter.RequestDevice(&deviceDesc, wgpu::CallbackMode::WaitAnyOnly,
         [](wgpu::RequestDeviceStatus, wgpu::Device value, wgpu::StringView, wgpu::Device* result) { *result = std::move(value); }, &device);
     instance.WaitAny(future, UINT64_MAX);
-    auto shader = readWgslFile(device, SOURCE_DIR "/experiments/ellipsoid.wgsl");
+    auto shader = readWgslFile(device, SRC_DIR "/../experiments/ellipsoid.wgsl");
     wgpu::BindGroupLayoutEntry entries[] {
         {.binding = 0, .visibility = wgpu::ShaderStage::Vertex, .buffer = {.type = wgpu::BufferBindingType::ReadOnlyStorage}},
         {.binding = 1, .visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment, .buffer = {.type = wgpu::BufferBindingType::Uniform}},
@@ -259,7 +259,7 @@ int main(int argc, char* argv[]) {
         scene.camera.distance = close ? 3.8f : 7.5f;
         scenes.push_back(std::move(scene));
     }
-    auto luigi = readPlyFile(SOURCE_DIR "/assets/luigi.ply");
+    auto luigi = readPlyFile(SRC_DIR "/../assets/luigi.ply");
     Eigen::Vector3f lower = luigi[0].position.head<3>(), upper = lower;
     for (const auto& item : luigi) {
         lower = lower.cwiseMin(item.position.head<3>());

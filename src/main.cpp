@@ -45,8 +45,8 @@ struct GSplatApp : App {
     void createBindGroup();
 
     void update() override;
-    void drawUi() override;
-    void draw(const wgpu::CommandEncoder& encoder, const wgpu::TextureView& target) override;
+    void buildUi() override;
+    void recordCommands(const wgpu::CommandEncoder& encoder, const wgpu::TextureView& target) override;
 
     void resetCamera();
     void updateCamera();
@@ -82,7 +82,7 @@ bool GSplatApp::loadGaussians(const char* path) {
 }
 
 void GSplatApp::createPipeline() {
-    wgpu::ShaderModule shader = readWgslFile(device, SOURCE_DIR "/src/shaders.wgsl");
+    wgpu::ShaderModule shader = readWgslFile(device, SRC_DIR "/shaders.wgsl");
 
     wgpu::BlendState blend {
         .color = {.srcFactor = wgpu::BlendFactor::One, .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
@@ -171,7 +171,7 @@ void GSplatApp::update() {
     updateCamera();
 }
 
-void GSplatApp::draw(const wgpu::CommandEncoder& encoder, const wgpu::TextureView& target) {
+void GSplatApp::recordCommands(const wgpu::CommandEncoder& encoder, const wgpu::TextureView& target) {
     wgpu::RenderPassColorAttachment color {
         .view = target,
         .loadOp = wgpu::LoadOp::Clear,
@@ -189,7 +189,7 @@ void GSplatApp::draw(const wgpu::CommandEncoder& encoder, const wgpu::TextureVie
     pass.End();
 }
 
-void GSplatApp::drawUi() {
+void GSplatApp::buildUi() {
     float uiScale = ImGui::GetStyle().FontScaleDpi;
     ImGui::SetNextWindowPos({12 * uiScale, 12 * uiScale}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({340 * uiScale, 480 * uiScale}, ImGuiCond_FirstUseEver);
@@ -276,13 +276,13 @@ void GSplatApp::onScroll(double, double y) {
 int main(int argc, char* argv[]) {
     static GSplatApp app {};
     if (!app.init()) return 1;
-    if (!app.loadGaussians(SOURCE_DIR "/assets/luigi.ply")) {
+    if (!app.loadGaussians(SRC_DIR "/../assets/luigi.ply")) {
         app.shutdown();
         return 1;
     }
 
     if (argc > 1 && std::string_view(argv[1]) == "--capture") {
-        app.drawFrame();
+        app.frame();
         app.shutdown();
     } else {
         app.run();

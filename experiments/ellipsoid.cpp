@@ -81,7 +81,7 @@ void EllipsoidExperiment::init() {
         wgpu::BindGroupDescriptor groupDesc {.layout = layout, .entryCount = 2, .entries = bindings};
         groups[i] = device.CreateBindGroup(&groupDesc);
     }
-    auto shader = readWgslFile(device, SOURCE_DIR "/experiments/ellipsoid.wgsl");
+    auto shader = readWgslFile(device, SRC_DIR "/../experiments/ellipsoid.wgsl");
     wgpu::BlendState blend {
         .color = {.srcFactor = wgpu::BlendFactor::One, .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
         .alpha = {.srcFactor = wgpu::BlendFactor::One, .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},

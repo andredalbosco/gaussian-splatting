@@ -255,8 +255,8 @@ projected quad at the image edges.
 | [`src/shaders.wgsl`](../src/shaders.wgsl) | Projected covariance, quad, Gaussian evaluation |
 | [`experiments/validate_splats.cpp`](../experiments/validate_splats.cpp) | Native numerical shader checks |
 
-`App` owns the window, device, frame loop, and presentation. Its `drawFrame()` calls
-`drawUi()`, `update()`, and `draw(encoder, target)` on the derived app. The derived app
+`App` owns the window, device, frame loop, and presentation. Its `frame()` calls
+`buildUi()`, `update()`, and `recordCommands(encoder, target)` on the derived app. The derived app
 records its render passes, then `App` draws ImGui in a separate pass that loads the
 existing target contents. `GSplatApp::init()` initializes
 the base app and Gaussian pipeline without loading any Gaussians.

@@ -66,7 +66,7 @@ target_compile_options(gaussian_splatting PRIVATE -fno-exceptions)
 target_link_libraries(gaussian_splatting PRIVATE app Eigen3::Eigen)
 
 if(EMSCRIPTEN)
-    target_compile_definitions(gaussian_splatting PRIVATE SOURCE_DIR=".")
+    target_compile_definitions(gaussian_splatting PRIVATE SRC_DIR="./src")
     target_link_options(gaussian_splatting PRIVATE
         -sASYNCIFY=1
         -sALLOW_MEMORY_GROWTH=1
@@ -80,7 +80,7 @@ if(EMSCRIPTEN)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/index.html"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/luigi.ply")
 else()
-    target_compile_definitions(gaussian_splatting PRIVATE SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_definitions(gaussian_splatting PRIVATE SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src")
 endif()
 
 add_executable(ellipsoid experiments/ellipsoid.cpp src/camera.cpp)
@@ -89,20 +89,20 @@ target_compile_definitions(ellipsoid PRIVATE GLFW_INCLUDE_NONE)
 target_compile_options(ellipsoid PRIVATE -fno-exceptions)
 target_link_libraries(ellipsoid PRIVATE app Eigen3::Eigen)
 if(EMSCRIPTEN)
-    target_compile_definitions(ellipsoid PRIVATE SOURCE_DIR=".")
+    target_compile_definitions(ellipsoid PRIVATE SRC_DIR="./src")
     target_link_options(ellipsoid PRIVATE
         -sASYNCIFY=1 -sALLOW_MEMORY_GROWTH=1
         "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/src/index.html"
         "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/experiments/ellipsoid.wgsl@/experiments/ellipsoid.wgsl")
     set_target_properties(ellipsoid PROPERTIES SUFFIX ".html")
 else()
-    target_compile_definitions(ellipsoid PRIVATE SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_definitions(ellipsoid PRIVATE SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src")
 endif()
 
 if(NOT EMSCRIPTEN)
     add_executable(ellipsoid_benchmark experiments/ellipsoid_benchmark.cpp src/gaussian.cpp src/camera.cpp)
     target_include_directories(ellipsoid_benchmark PRIVATE src)
-    target_compile_definitions(ellipsoid_benchmark PRIVATE GLFW_INCLUDE_NONE SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_definitions(ellipsoid_benchmark PRIVATE GLFW_INCLUDE_NONE SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_options(ellipsoid_benchmark PRIVATE -fno-exceptions)
     target_link_libraries(ellipsoid_benchmark PRIVATE wgpu_utils Eigen3::Eigen)
 endif()
@@ -110,7 +110,7 @@ endif()
 if(NOT EMSCRIPTEN)
     add_executable(validate_splats experiments/validate_splats.cpp src/camera.cpp)
     target_include_directories(validate_splats PRIVATE src)
-    target_compile_definitions(validate_splats PRIVATE GLFW_INCLUDE_NONE SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_definitions(validate_splats PRIVATE GLFW_INCLUDE_NONE SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_options(validate_splats PRIVATE -fno-exceptions)
     target_link_libraries(validate_splats PRIVATE wgpu_utils Eigen3::Eigen)
 endif()
