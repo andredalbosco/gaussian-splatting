@@ -1,6 +1,7 @@
 #pragma once
 
-#include "utils.hpp"
+#include "glfw_utils.hpp"
+#include "wgpu_utils.hpp"
 
 struct BenchmarkResult {
     double gpuMedianMs;

@@ -18,7 +18,7 @@ A Gaussian stores four vectors in [`Gaussian`](../src/gaussian.hpp):
 | Rotation | Unit quaternion, stored as $(x,y,z,w)$ |
 | Color | Fixed RGB and peak opacity |
 
-[`readPlyFile`](../src/utils.cpp) decodes logarithmic scales with `exp`, opacity logits
+[`readPlyFile`](../src/gaussian.cpp) decodes logarithmic scales with `exp`, opacity logits
 with the sigmoid function, and normalizes the quaternion. It converts the PLY's existing
 DC color coefficients to RGB once. Higher-order spherical harmonics are not used.
 
@@ -245,13 +245,21 @@ projected quad at the image edges.
 |---|---|
 | [`src/gaussian.hpp`](../src/gaussian.hpp) | GPU-compatible Gaussian data |
 | [`src/gaussian.cpp`](../src/gaussian.cpp) | Gaussian PLY loading |
-| [`src/utils.cpp`](../src/utils.cpp) | PLY decoding and window/WebGPU setup |
+| [`src/app.cpp`](../src/app.cpp) | Base application setup, frame loop, render pass, presentation |
+| [`src/glfw_utils.cpp`](../src/glfw_utils.cpp) | Window creation and framebuffer size |
+| [`src/imgui_utils.cpp`](../src/imgui_utils.cpp) | ImGui initialization, DPI scaling, shutdown |
+| [`src/wgpu_utils.cpp`](../src/wgpu_utils.cpp) | Device, surface, resizing, and shader loading |
+| [`src/utils.cpp`](../src/utils.cpp) | General file loading |
 | [`src/camera.cpp`](../src/camera.cpp) | View and perspective matrices |
-| [`src/main.cpp`](../src/main.cpp) | Buffers, sorting, draw loop, blending, controls |
+| [`src/main.cpp`](../src/main.cpp) | Gaussian buffers, sorting, draw commands, blending, controls |
 | [`src/shaders.wgsl`](../src/shaders.wgsl) | Projected covariance, quad, Gaussian evaluation |
 | [`experiments/validate_splats.cpp`](../experiments/validate_splats.cpp) | Native numerical shader checks |
 
-`init()` creates the window, device, rendering pipeline, and UI without loading a scene.
+`App` owns the window, device, frame loop, and presentation. Its `drawFrame()` calls
+`drawUi()`, `update()`, and `draw(encoder, target)` on the derived app. The derived app
+records its render passes, then `App` draws ImGui in a separate pass that loads the
+existing target contents. `GSplatApp::init()` initializes
+the base app and Gaussian pipeline without loading any Gaussians.
 `main()` loads the initial Gaussians with `loadGaussians(path)`, then calls the argument-free
 `run()` to start the frame loop. A later `loadGaussians(path)`
 replaces the Gaussian data, refreshes the scene buffers and bind group, reframes the camera,

@@ -1,6 +1,7 @@
+#include "app.hpp"
 #include "camera.hpp"
 #include "gaussian.hpp"
-#include "utils.hpp"
+#include "wgpu_utils.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -13,22 +14,8 @@
 #include <Eigen/Geometry>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_wgpu.h>
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten/emscripten.h>
-#endif
-
-struct GSplatApp {
-    GLFWwindow* window;
-    wgpu::Instance instance;
-    wgpu::Device device;
-    wgpu::Queue queue;
-
-    wgpu::Surface surface;
-    wgpu::SurfaceConfiguration surfaceConfig;
-
+struct GSplatApp : App {
     wgpu::RenderPipeline pipeline;
     wgpu::BindGroup bindGroup;
 
@@ -50,8 +37,6 @@ struct GSplatApp {
     float scrollDelta = 0;
 
     bool init();
-    void run();
-    void shutdown();
 
     bool loadGaussians(const char* path);
 
@@ -59,51 +44,21 @@ struct GSplatApp {
     void createBuffers();
     void createBindGroup();
 
-    void drawFrame();
-    void drawUi();
+    void update() override;
+    void drawUi() override;
+    void draw(const wgpu::CommandEncoder& encoder, const wgpu::TextureView& target) override;
 
     void resetCamera();
     void updateCamera();
 
     void handleInput();
-    static void onScroll(GLFWwindow* window, double x, double y);
+    void onScroll(double x, double y) override;
 };
 
 bool GSplatApp::init() {
-    initGlfw(800, 600, "Gaussian Splatting", window);
-    initWgpu(window, instance, device, surface, surfaceConfig);
-    if (!device) return false;
-
-    queue = device.GetQueue();
-    glfwSetWindowUserPointer(window, this);
-    glfwSetScrollCallback(window, onScroll);
-
+    if (!App::init("Gaussian Splatting")) return false;
     createPipeline();
-
-    initImgui(device, window, surfaceConfig.format);
-    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-
     return true;
-}
-
-void GSplatApp::run() {
-#ifdef __EMSCRIPTEN__
-    emscripten_set_main_loop_arg([](void* arg) {
-        static_cast<GSplatApp*>(arg)->drawFrame();
-    }, this, 0, false);
-#else
-    while (!glfwWindowShouldClose(window)) {
-        drawFrame();
-    }
-
-    shutdown();
-#endif
-}
-
-void GSplatApp::shutdown() {
-    shutdownImgui();
-    shutdownWgpu(surface);
-    shutdownGlfw(window);
 }
 
 bool GSplatApp::loadGaussians(const char* path) {
@@ -211,49 +166,27 @@ void GSplatApp::createBindGroup() {
     bindGroup = device.CreateBindGroup(&bindGroupDesc);
 }
 
-void GSplatApp::drawFrame() {
-    glfwPollEvents();
-    if (!handleWindowResize(surface, window, surfaceConfig)) return;
-
-    ImGui_ImplWGPU_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
-    ImGui::NewFrame();
-    drawUi();
+void GSplatApp::update() {
     handleInput();
     updateCamera();
-    ImGui::Render();
+}
 
-    wgpu::SurfaceTexture frame;
-    surface.GetCurrentTexture(&frame);
-    if (!frame.texture) return;
-
+void GSplatApp::draw(const wgpu::CommandEncoder& encoder, const wgpu::TextureView& target) {
     wgpu::RenderPassColorAttachment color {
-        .view = frame.texture.CreateView(),
+        .view = target,
         .loadOp = wgpu::LoadOp::Clear,
         .storeOp = wgpu::StoreOp::Store,
         .clearValue = {0.05, 0.05, 0.07, 1.0},
     };
-
     wgpu::RenderPassDescriptor passDesc {
         .colorAttachmentCount = 1,
         .colorAttachments = &color,
     };
-
-    wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
     wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&passDesc);
     pass.SetPipeline(pipeline);
     pass.SetBindGroup(0, bindGroup);
     pass.Draw(4, gaussianCount);
-    ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), pass.Get());
     pass.End();
-
-    wgpu::CommandBuffer commands = encoder.Finish();
-    queue.Submit(1, &commands);
-
-#ifndef __EMSCRIPTEN__
-    surface.Present();
-#endif
-    instance.ProcessEvents();
 }
 
 void GSplatApp::drawUi() {
@@ -336,9 +269,8 @@ void GSplatApp::handleInput() {
     mouse = position;
 }
 
-void GSplatApp::onScroll(GLFWwindow* window, double, double y) {
-    GSplatApp* app = static_cast<GSplatApp*>(glfwGetWindowUserPointer(window));
-    app->scrollDelta += static_cast<float>(y);
+void GSplatApp::onScroll(double, double y) {
+    scrollDelta += static_cast<float>(y);
 }
 
 int main(int argc, char* argv[]) {

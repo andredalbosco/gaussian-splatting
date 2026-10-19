@@ -3,8 +3,9 @@
 Gaussian splatting using WebGPU through Dawn.
 The math and rendering stages are explained in [docs/gaussian_splatting.md](docs/gaussian_splatting.md).
 `src/main.cpp` loads Luigi and renders depth-sorted, transparent Gaussian splats using `src/shaders.wgsl`.
-Window and Dawn initialization live in `src/utils.cpp`.
-Shared `initImgui` and `shutdownImgui` helpers live in `src/utils.cpp`.
+`GSplatApp` derives from `App` in `src/app.hpp` and `src/app.cpp`, which handles window/device setup,
+the frame loop, UI frames, and presentation. GLFW, ImGui, and WebGPU helpers live in
+`src/glfw_utils.cpp`, `src/imgui_utils.cpp`, and `src/wgpu_utils.cpp`; general helpers stay in `src/utils.cpp`.
 Orbit camera and view/projection math live in `src/camera.hpp` and `src/camera.cpp`.
 Eigen 5.0.1 supplies vector, quaternion, and camera-matrix math.
 Native development targets blacknoir on Linux. The Emscripten build uses browser WebGPU.
