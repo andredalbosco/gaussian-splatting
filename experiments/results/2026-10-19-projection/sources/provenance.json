@@ -1,0 +1,14 @@
+[
+  {
+    "name": "gsplat",
+    "commit": "512d366b67073d77ca099ede742683c165dfc23b",
+    "url": "https://raw.githubusercontent.com/nerfstudio-project/gsplat/512d366b67073d77ca099ede742683c165dfc23b/gsplat/cuda/include/Utils.cuh",
+    "sha256": "f481e9efa784de4cd49cba153d14d4a6337733cc72b207d6e78fc024fec4f00f"
+  },
+  {
+    "name": "playcanvas",
+    "commit": "40854828f51deaf53221093403114e9490e8da04",
+    "url": "https://raw.githubusercontent.com/playcanvas/engine/40854828f51deaf53221093403114e9490e8da04/src/scene/shader-lib/wgsl/chunks/gsplat/vert/gsplatCorner.js",
+    "sha256": "a2e3189af7800fe8eb675f3219b1325941a9d3e17857285582e90059fdd66995"
+  }
+]

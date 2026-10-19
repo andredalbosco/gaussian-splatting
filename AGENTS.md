@@ -11,6 +11,7 @@ Keep the code as lean as possible.
 - Adhere to the existing style of the file or surrounding code instead of introducing a new one.
 - Avoid unnecessary abstractions, helper functions, and comments.
 - Avoid modifying code not directly/strictly related to your task.
+- Keep experimental renderers, shaders, viewers, and benchmarks in `experiments/`, separate from the main app in `src/`.
 
 - Order function arguments as: owning context (instance/device), resource being operated on, inputs/options, then output references. For surface configuration, use device, adapter, surface, window.
 - Keep short parameter lists on one line; stack longer lists with one parameter per line.

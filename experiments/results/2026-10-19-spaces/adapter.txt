@@ -1,0 +1,4 @@
+GPU: NVIDIA GeForce RTX 4090
+driver: NVIDIA: 580.159.03 580.159.3.0
+backend: 6
+64 samples x 7 shuffled trials, 8 warmup frames per batch; microseconds

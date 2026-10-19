@@ -1,0 +1,5 @@
+method,path,max_channel_error,channels_over_2
+pixel_ndc,direct,0,0
+pixel_clip,direct,2,0
+ndc_clip,direct,2,0
+clip_clip,direct,2,0

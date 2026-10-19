@@ -29,14 +29,21 @@ int main() {
     };
     auto pipeline = device.CreateRenderPipeline(&pipelineDesc);
     int failures = 0;
-    for (int test = 0; test < 5; test++) {
+    for (int test = 0; test < 6; test++) {
         uint32_t width = test == 3 ? 257 : 129, height = test == 3 ? 97 : 129;
-        Eigen::Matrix4f vp = projectionMatrix(60, float(width) / height, 0.1f, 20);
+        Eigen::Matrix4f projection = projectionMatrix(60, float(width) / height, 0.1f, 20);
+        Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
+        if (test == 5) {
+            view.block<3, 3>(0, 0) = (Eigen::AngleAxisf(0.3f, Eigen::Vector3f::UnitY()) *
+                Eigen::AngleAxisf(-0.2f, Eigen::Vector3f::UnitX())).toRotationMatrix();
+            view.block<3, 1>(0, 3) = Eigen::Vector3f(0.1f, -0.2f, 0.1f);
+        }
+        Eigen::Matrix4f vp = projection * view;
         std::vector<Gaussian> shapes {
             {{0, 0, 2, 1}, {0.2f, 0.2f, 0.2f, 0}, {0, 0, 0, 1}, {1, 0, 0, 0.5f}},
         };
         if (test == 1) shapes.push_back({{0, 0, 3, 1}, {0.3f, 0.3f, 0.3f, 0}, {0, 0, 0, 1}, {0, 0, 1, 0.5f}});
-        if (test == 2 || test == 3) {
+        if (test == 2 || test == 3 || test == 5) {
             shapes[0].position = {0.35f, -0.15f, 2, 1};
             shapes[0].scale = {0.4f, 0.05f, 0.2f, 0};
             Eigen::Quaternionf q = Eigen::AngleAxisf(0.7f, Eigen::Vector3f::UnitZ()) *
@@ -59,14 +66,15 @@ int main() {
         auto orderBuffer = device.CreateBuffer(&bufferDesc);
         queue.WriteBuffer(orderBuffer, 0, order.data(), bufferDesc.size);
         bufferDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-        bufferDesc.size = 80;
+        bufferDesc.size = 144;
         auto cameraBuffer = device.CreateBuffer(&bufferDesc);
-        Eigen::Vector4f viewport {float(width), float(height), 0, 0};
+        Eigen::Vector4f viewport {float(width), float(height), projection(0, 0), projection(1, 1)};
         queue.WriteBuffer(cameraBuffer, 0, vp.data(), 64);
-        queue.WriteBuffer(cameraBuffer, 64, viewport.data(), 16);
+        queue.WriteBuffer(cameraBuffer, 64, view.data(), 64);
+        queue.WriteBuffer(cameraBuffer, 128, viewport.data(), 16);
         wgpu::BindGroupEntry entries[] {
             {.binding = 0, .buffer = shapeBuffer, .size = shapeBuffer.GetSize()},
-            {.binding = 1, .buffer = cameraBuffer, .size = 80},
+            {.binding = 1, .buffer = cameraBuffer, .size = cameraBuffer.GetSize()},
             {.binding = 2, .buffer = orderBuffer, .size = orderBuffer.GetSize()},
         };
         wgpu::BindGroupDescriptor groupDesc {.layout = pipeline.GetBindGroupLayout(0), .entryCount = 3, .entries = entries};

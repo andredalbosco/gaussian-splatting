@@ -1,0 +1,9 @@
+scene,method,max_scaled_error,max_absolute_error,failures
+in_frustum,pixel_ndc,1.59997e-06,3.57806e-05,0
+in_frustum,pixel_clip,1.59997e-06,3.57806e-05,0
+in_frustum,ndc_clip,1.81801e-06,4.85062e-05,0
+in_frustum,clip_clip,1.12372e-06,3.55622e-05,0
+off_axis,pixel_ndc,2.96279e-06,0.000153431,0
+off_axis,pixel_clip,2.96279e-06,0.000153431,0
+off_axis,ndc_clip,2.90677e-06,0.000159315,0
+off_axis,clip_clip,2.3022e-06,0.000144227,0

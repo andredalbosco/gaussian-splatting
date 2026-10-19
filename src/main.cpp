@@ -30,7 +30,6 @@ struct GSplatApp : App {
     std::vector<uint32_t> order;
     std::vector<float> depths;
     Eigen::Vector3f lastSortDirection = Eigen::Vector3f::Zero();
-
     OrbitCamera camera;
 
     Eigen::Vector2d mouse = Eigen::Vector2d::Zero();
@@ -134,7 +133,7 @@ void GSplatApp::createBuffers() {
 
     wgpu::BufferDescriptor cameraBufferDesc {
         .usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
-        .size = sizeof(Eigen::Matrix4f) + sizeof(Eigen::Vector4f),
+        .size = 2 * sizeof(Eigen::Matrix4f) + sizeof(Eigen::Vector4f),
     };
     cameraBuffer = device.CreateBuffer(&cameraBufferDesc);
 }
@@ -237,11 +236,17 @@ void GSplatApp::resetCamera() {
 }
 
 void GSplatApp::updateCamera() {
-    Eigen::Matrix4f viewProjection = camera.viewProjection(
-        float(surfaceConfig.width) / surfaceConfig.height);
+    Eigen::Matrix4f view = viewMatrix(camera.position(), camera.center, Eigen::Vector3f::UnitY());
+    Eigen::Matrix4f projection = projectionMatrix(
+        camera.fovy, float(surfaceConfig.width) / surfaceConfig.height, camera.zNear, camera.zFar);
+    Eigen::Matrix4f viewProjection = projection * view;
+    Eigen::Vector4f viewport {
+        float(surfaceConfig.width), float(surfaceConfig.height),
+        projection(0, 0), projection(1, 1),
+    };
     queue.WriteBuffer(cameraBuffer, 0, viewProjection.data(), sizeof(viewProjection));
-    Eigen::Vector4f viewport {float(surfaceConfig.width), float(surfaceConfig.height), 0, 0};
-    queue.WriteBuffer(cameraBuffer, sizeof(viewProjection), viewport.data(), sizeof(viewport));
+    queue.WriteBuffer(cameraBuffer, sizeof(viewProjection), view.data(), sizeof(view));
+    queue.WriteBuffer(cameraBuffer, sizeof(viewProjection) + sizeof(view), viewport.data(), sizeof(viewport));
 
     Eigen::Vector3f direction = (camera.center - camera.position()).normalized();
     if ((direction - lastSortDirection).squaredNorm() == 0) return;

@@ -1,0 +1,17 @@
+case 0: visible=0 pairs=0 overflow=0 bad-order=0 max-error=0.0009926 mismatched-channels=0
+case 1: visible=1 pairs=24 overflow=0 bad-order=0 max-error=0.00247324 mismatched-channels=0
+case 2: visible=2 pairs=48 overflow=0 bad-order=0 max-error=0.00265971 mismatched-channels=0
+case 3: visible=2 pairs=72 overflow=0 bad-order=0 max-error=0.00238973 mismatched-channels=0
+case 4: visible=1 pairs=22 overflow=0 bad-order=0 max-error=0.00259531 mismatched-channels=0
+case 5: visible=0 pairs=0 overflow=0 bad-order=0 max-error=0.0009926 mismatched-channels=0
+case 6: visible=780 pairs=2744 overflow=0 bad-order=0 max-error=0.00883574 mismatched-channels=0
+case 7: visible=6477 pairs=18903 overflow=0 bad-order=0 max-error=0.00882066 mismatched-channels=0
+completed-frame case=7 renderer=quad median-ms=0.187536 gpu-ms=0 record-ms=0.005615 finish-ms=0.008631
+completed-frame case=7 renderer=tiles median-ms=15.2583 gpu-ms=0.458752 record-ms=2.22394 finish-ms=0.012811
+case 8: visible=400 pairs=368000 overflow=0 bad-order=0 max-error=0.00254673 mismatched-channels=0
+completed-frame case=8 renderer=quad median-ms=1.88014 gpu-ms=0.262144 record-ms=0.002661 finish-ms=0.004095
+completed-frame case=8 renderer=tiles median-ms=13.7471 gpu-ms=4.9152 record-ms=1.77512 finish-ms=0.013987
+case 9: visible=14526 pairs=147620 overflow=0 bad-order=0 max-error=0.014299 mismatched-channels=0
+completed-frame case=9 renderer=quad median-ms=0.128209 gpu-ms=0.065536 record-ms=0.001846 finish-ms=0.002839
+completed-frame case=9 renderer=tiles median-ms=16.9986 gpu-ms=2.5559 record-ms=3.69638 finish-ms=0.018757
+case 10: visible=1 pairs=24 overflow=0 bad-order=0 max-error=0.00247324 mismatched-channels=0

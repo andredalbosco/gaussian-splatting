@@ -1,3 +1,7 @@
+@group(0) @binding(0) var<storage, read> gaussians: array<Gaussian>;
+@group(0) @binding(1) var<uniform> camera: Camera;
+@group(0) @binding(2) var<storage, read> order: array<u32>;
+
 struct Gaussian {
     position: vec4f,
     scale: vec4f,
@@ -7,7 +11,9 @@ struct Gaussian {
 
 struct Camera {
     view_projection: mat4x4f,
-    viewport: vec4f,
+    view: mat4x4f,
+    viewport: vec2f,
+    projection_scale: vec2f,
 }
 
 struct VSInput {
@@ -22,44 +28,56 @@ struct VSOutput {
     @location(2) @interpolate(flat) color: vec4f,
 }
 
-@group(0) @binding(0) var<storage, read> gaussians: array<Gaussian>;
-@group(0) @binding(1) var<uniform> camera: Camera;
-@group(0) @binding(2) var<storage, read> order: array<u32>;
-
 const quad_corners = array(vec2f(-1, -1), vec2f(1, -1), vec2f(-1, 1), vec2f(1, 1));
+const culled_position = vec4f(2, 2, 0, 1);
+const eps2d = 0.3;
 
-fn quat_rotate(q: vec4f, v: vec3f) -> vec3f {
-    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
-}
-
-fn projected_axis(gaussian: Gaussian, clip: vec4f, local_axis: vec3f) -> vec2f {
-    let axis = camera.view_projection * vec4f(quat_rotate(gaussian.rotation, local_axis), 0);
-    return (axis.xy * clip.w - clip.xy * axis.w) / (clip.w * clip.w) * camera.viewport.xy * 0.5;
+fn quat_to_matrix(q: vec4f) -> mat3x3f {
+    let d = 2.0 * q.xyz;
+    let xx = q.x * d.x; let yy = q.y * d.y; let zz = q.z * d.z;
+    let xy = q.x * d.y; let xz = q.x * d.z; let yz = q.y * d.z;
+    let wx = q.w * d.x; let wy = q.w * d.y; let wz = q.w * d.z;
+    return mat3x3f(
+        vec3f(1 - yy - zz, xy + wz, xz - wy),
+        vec3f(xy - wz, 1 - xx - zz, yz + wx),
+        vec3f(xz + wy, yz - wx, 1 - xx - yy),
+    );
 }
 
 @vertex fn vs_main(input: VSInput) -> VSOutput {
-    let gaussian = gaussians[order[input.instance_index]];
-    let clip = camera.view_projection * vec4f(gaussian.position.xyz, 1);
     var output: VSOutput;
-    output.position = vec4f(2, 2, 0, 1);
-    if (clip.w <= 0.0 || clip.z < 0.0 || clip.z > clip.w) { return output; }
 
-    // Columns of B = J * R_camera * R_object * S; covariance = B * transpose(B).
-    let ax = projected_axis(gaussian, clip, vec3f(gaussian.scale.x, 0, 0));
-    let ay = projected_axis(gaussian, clip, vec3f(0, gaussian.scale.y, 0));
-    let az = projected_axis(gaussian, clip, vec3f(0, 0, gaussian.scale.z));
-    let x = vec3f(ax.x, ay.x, az.x);
-    let y = vec3f(ax.y, ay.y, az.y);
-    let a = dot(x, x) + 0.3;
-    let b = dot(x, y);
-    let c = dot(y, y) + 0.3;
-    let determinant = a * c - b * b;
-    if (determinant <= 0.0) { return output; }
+    let gaussian = gaussians[order[input.instance_index]];
+    let clip_pos = camera.view_projection * vec4f(gaussian.position.xyz, 1);
+    let view_pos = (camera.view * vec4f(gaussian.position.xyz, 1)).xyz;
+
+    output.position = culled_position;
+    if (clip_pos.w <= 0.0 || clip_pos.z < 0.0 || clip_pos.z > clip_pos.w) { return output; }
+
+    let f = camera.projection_scale;
+
+    let J = mat3x2f(vec2f(f.x, 0), vec2f(0, f.y), -f * view_pos.xy / view_pos.z);
+    let W = mat3x3f(camera.view[0].xyz, camera.view[1].xyz, camera.view[2].xyz);
+    let R = quat_to_matrix(gaussian.rotation);
+    let M = mat3x3f(R[0] * gaussian.scale.x, R[1] * gaussian.scale.y, R[2] * gaussian.scale.z);
+
+    let B = J * W * M;
+    let pixel_to_clip = 2.0 * clip_pos.w / camera.viewport;
+    let blur = eps2d * pixel_to_clip * pixel_to_clip;
+    let cov = B * transpose(B) + mat2x2f(blur.x, 0, 0, blur.y);
+
+    let det_cov = determinant(cov);
+    if (det_cov <= 0.0) { return output; }
+
+    let a = cov[0][0];
+    let b = cov[0][1];
+    let c = cov[1][1];
 
     output.offset = quad_corners[input.vertex_index] * 3.0 * sqrt(vec2f(a, c));
-    output.position = vec4f(clip.xy / clip.w + output.offset * 2.0 / camera.viewport.xy, clip.z / clip.w, 1);
-    output.conic = vec3f(c, -b, a) / determinant;
+    output.position = vec4f(clip_pos.xy + output.offset, clip_pos.zw);
+    output.conic = vec3f(c, -b, a) / det_cov;
     output.color = gaussian.color;
+
     return output;
 }
 

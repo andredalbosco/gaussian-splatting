@@ -1,0 +1,16 @@
+GPU: NVIDIA GeForce RTX 4090
+CPU covariance validation failures: 0
+Image validation failures: 0
+projection_10k
+  trial 1/3
+  trial 2/3
+  trial 3/3
+projection_100k
+  trial 1/3
+  trial 2/3
+  trial 3/3
+projection_1m
+vkAllocateMemory failed with VK_ERROR_OUT_OF_DEVICE_MEMORY
+ - While calling [Device].CreateBuffer([BufferDescriptor]).
+    at CheckVkOOMThenSuccessImpl (/home/blacknoir/Projects/gaussian-splatting/external/dawn/src/dawn/native/vulkan/VulkanError.cpp:118)
+

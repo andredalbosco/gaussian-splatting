@@ -1,0 +1,5 @@
+timestamp, name, memory.free [MiB], pstate, utilization.gpu [%], clocks.current.sm [MHz], power.draw [W], temperature.gpu
+2026/10/19 07:29:09.844, NVIDIA GeForce RTX 4090, 549 MiB, P2, 25 %, 2625 MHz, 82.94 W, 32
+2026/10/19 07:29:10.849, NVIDIA GeForce RTX 4090, 388 MiB, P2, 25 %, 2790 MHz, 143.43 W, 42
+2026/10/19 07:29:11.849, NVIDIA GeForce RTX 4090, 388 MiB, P2, 98 %, 2775 MHz, 346.11 W, 48
+2026/10/19 07:29:12.850, NVIDIA GeForce RTX 4090, 388 MiB, P2, 99 %, 2790 MHz, 323.20 W, 36

@@ -1,6 +1,7 @@
 # Gaussian splatting
 
-This viewer renders a scene as overlapping, transparent 3D Gaussians. Each Gaussian becomes
+This viewer renders a scene as overlapping, transparent 3D Gaussians using quads.
+The tiled renderer is a separate experiment under `experiments/`. Each Gaussian becomes
 an elliptical footprint on the image. The vertex shader computes its projected shape;
 the fragment shader evaluates its opacity; blending combines it with the other splats.
 
@@ -65,7 +66,7 @@ f_yY/Z+c_y
 $$
 
 The projected center is $\mu_{2D}=\pi(\mu_c)$. The implementation obtains the same
-center by multiplying by the view-projection matrix and dividing clip-space $xy$ by $w$.
+center by multiplying by the view-projection matrix; rasterization performs the divide by $w$.
 
 ## 3. Projecting the differential vectors
 
@@ -101,17 +102,24 @@ but does not act on the differential vectors.
 $B$ has two rows and three columns. Its columns are the three projected, scaled axes.
 All three contribute: variation in depth can move an image point because of perspective.
 
-In [`projected_axis`](../src/shaders.wgsl), we differentiate the homogeneous divide
-directly. If $c$ is the center in clip space and $a$ is a transformed axis, then
+The quad shader in [`src/shaders.wgsl`](../src/shaders.wgsl) uses the same
+factorization in clip-space footprint units. For a Gaussian center with clip $w=Z$,
+let $D=\operatorname{diag}(2w/\text{width},2w/\text{height})$. Then
+$J_{\mathrm{clip}}=DJ_{\mathrm{pixel}}$:
 
 $$
-\delta\left(\frac{c_{xy}}{c_w}\right)
-=\frac{a_{xy}c_w-c_{xy}a_w}{c_w^2}.
+J_{\mathrm{clip}}=
+\begin{pmatrix}
+P_{00} & 0 & -P_{00}X/Z\\
+0 & P_{11} & -P_{11}Y/Z
+\end{pmatrix}.
 $$
 
-The shader multiplies this NDC displacement by half the framebuffer width and height,
-expressing the projected differential in pixel units. Its vertical coordinate points up;
-the interpolated fragment offsets use that same convention.
+`camera.projection_scale` stores $(P_{00},P_{11})$, the projection matrix diagonal.
+`quat_to_matrix` constructs $R$, and scaling its columns constructs $RS$.
+The shader evaluates `B = J * W * M` and `B * transpose(B)` in these clip units.
+This describes offsets on the quad's constant-$w$ plane; the depth derivative remains
+necessary. The tiled compute renderer retains its separate pixel-space representation.
 
 ## 4. Constructing the 2D covariance
 
@@ -132,22 +140,22 @@ $$
 =\begin{pmatrix}a&b\\b&c\end{pmatrix}.
 $$
 
-Writing their horizontal components as $x=(x_1,x_2,x_3)$ and vertical components as
-$y=(y_1,y_2,y_3)$, the shader computes
+The shader constructs the covariance directly as a matrix product:
 
 ```wgsl
-a = dot(x, x) + 0.3;
-b = dot(x, y);
-c = dot(y, y) + 0.3;
+let pixel_to_clip = 2.0 * clip_pos.w / camera.viewport;
+let blur = 0.3 * pixel_to_clip * pixel_to_clip;
+let cov = B * transpose(B) + mat2x2f(blur.x, 0, 0, blur.y);
 ```
 
-The added diagonal variance is a small screen-space filter, measured in pixel². It keeps
-tiny footprints from collapsing. The renderer does not apply an amplitude compensation
-for this filter, so filtering changes the integrated contribution of small splats.
+The added filter is still 0.3 pixel² of variance along each image axis, transformed
+into clip units before addition. It keeps tiny footprints from collapsing. The renderer
+does not apply amplitude compensation, so filtering changes the integrated contribution
+of small splats.
 
 ## 5. Constructing the bounding quad
 
-For pixel displacement $d$ from the projected center, define
+For displacement $d$ from the projected center, expressed in the same units as the covariance, define
 
 $$
 q=d^T\Sigma_{2D}^{-1}d.
@@ -166,8 +174,9 @@ Four vertices at $\mu_{2D}+(\pm h_x,\pm h_y)$ form a triangle strip. An eigendec
 is unnecessary for this rectangle. Eigenvectors would instead give the ellipse's principal
 directions, with semi-axis lengths $3\sqrt{\lambda_1}$ and $3\sqrt{\lambda_2}$.
 
-The shader converts the pixel offsets back to NDC for rasterization. The quad's clip $w$
-is one, so interpolation of the pixel offsets is linear across the image.
+The shader adds the clip-space offsets directly to `clip_pos.xy`, preserving the center's
+`clip_pos.zw`. Every corner has the same $w$, so interpolation of the offsets is linear
+across the image. The inverse covariance and fragment offsets both use these clip units.
 
 This quad covers candidate pixels. The fragment shader removes the corners outside the
 ellipse; no ray–ellipsoid intersection is performed.
@@ -285,3 +294,37 @@ timings are not end-to-end timings of this sorted viewer.
 - [Original 3D Gaussian Splatting project](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/).
 - [Official rasterizer](https://github.com/graphdeco-inria/diff-gaussian-rasterization/blob/main/cuda_rasterizer/forward.cu): covariance projection and Gaussian evaluation.
 - [WebGPU Fundamentals: transparency and blending](https://webgpufundamentals.org/webgpu/lessons/webgpu-transparency.html).
+
+## 10. Experimental tiled GPU path
+
+The standalone `tiled_viewer` experiment provides a `GPU tiles` comparison checkbox.
+Its `TiledRenderer` lives in `experiments/tiled.cpp` and `experiments/tiled.wgsl`;
+the main app does not link or load it.
+Projection runs once per Gaussian. Offscreen and negligible-opacity primitives are
+culled, visible projected data is atomically compacted, and the shader emits one
+record for each intersected tile. Opacity-aware bounds retain the existing 3-sigma
+cutoff. An ellipse–rectangle test rejects tiles outside the contributing ellipse.
+
+The portable radix-16 implementation uses stable workgroup partitions, per-bin
+prefix offsets over workgroups, and global scatter. Least-significant-digit passes
+sort reverse source ID, positive camera-space depth, then tile ID. Reverse IDs make
+equal-depth compositing agree with the quad renderer's source-index tie order.
+WGSL represents the keys as separate 32-bit words; it requires no 64-bit integers,
+subgroups, CUDA, or CPU sorting. GPU-written dispatch arguments limit sorting work
+to the generated records.
+
+Each 16×16 workgroup shares batches of projected splats and accumulates front-to-back:
+`color += T * alpha * rgb`, `T *= 1 - alpha`. A pixel stops at `T < 1e-4`; an entire
+tile stops when every active pixel is finished. The output is presented by an ordinary
+three-vertex fullscreen draw before the base app's ImGui pass.
+
+Source records pack RGB into 8-bit channels (48 bytes total); projected records are
+32 bytes and tile records are 16 bytes. This trades color precision for bandwidth.
+The comparison renderer keeps its original full-precision buffers resident, so the
+combined comparison app does not achieve a 25% reduction in total allocated GPU memory.
+
+Tile-pair overflow preserves the previous complete output while an asynchronous
+counter readback grows storage. If device binding/dispatch limits prevent further
+growth, the UI reports the limit; reduce scene coverage or use the quad mode.
+
+Validation and initial timing scopes are documented in `experiments/TILED.md`.

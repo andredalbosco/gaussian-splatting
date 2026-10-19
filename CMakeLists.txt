@@ -60,6 +60,15 @@ add_library(app STATIC src/app.cpp src/imgui_utils.cpp)
 target_compile_options(app PRIVATE -fno-exceptions)
 target_link_libraries(app PUBLIC imgui wgpu_utils)
 
+add_library(tiled STATIC experiments/tiled.cpp)
+target_include_directories(tiled PUBLIC experiments)
+target_link_libraries(tiled PUBLIC wgpu_utils Eigen3::Eigen)
+if(EMSCRIPTEN)
+    target_compile_definitions(tiled PRIVATE SRC_DIR="./src")
+else()
+    target_compile_definitions(tiled PRIVATE SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src")
+endif()
+
 add_executable(gaussian_splatting src/main.cpp src/gaussian.cpp src/camera.cpp)
 target_compile_definitions(gaussian_splatting PRIVATE GLFW_INCLUDE_NONE)
 target_compile_options(gaussian_splatting PRIVATE -fno-exceptions)
@@ -81,6 +90,29 @@ if(EMSCRIPTEN)
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/luigi.ply")
 else()
     target_compile_definitions(gaussian_splatting PRIVATE SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src")
+endif()
+
+add_executable(tiled_viewer experiments/tiled_viewer.cpp src/gaussian.cpp src/camera.cpp)
+target_compile_options(tiled_viewer PRIVATE -fno-exceptions)
+target_link_libraries(tiled_viewer PRIVATE app tiled Eigen3::Eigen)
+if(EMSCRIPTEN)
+    target_compile_definitions(tiled_viewer PRIVATE SRC_DIR="./src")
+    target_link_options(tiled_viewer PRIVATE
+        -sASYNCIFY=1 -sALLOW_MEMORY_GROWTH=1
+        "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/src/index.html"
+        "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/src/shaders.wgsl@/src/shaders.wgsl"
+        "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/experiments/tiled.wgsl@/experiments/tiled.wgsl"
+        "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/experiments/tiled_present.wgsl@/experiments/tiled_present.wgsl"
+        "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/assets/luigi.ply@/assets/luigi.ply")
+    set_target_properties(tiled_viewer PROPERTIES SUFFIX ".html")
+    set_property(TARGET tiled_viewer APPEND PROPERTY LINK_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/index.html"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders.wgsl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/experiments/tiled.wgsl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/experiments/tiled_present.wgsl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/luigi.ply")
+else()
+    target_compile_definitions(tiled_viewer PRIVATE SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src")
 endif()
 
 add_executable(ellipsoid experiments/ellipsoid.cpp src/camera.cpp)
@@ -113,4 +145,22 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(validate_splats PRIVATE GLFW_INCLUDE_NONE SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_compile_options(validate_splats PRIVATE -fno-exceptions)
     target_link_libraries(validate_splats PRIVATE wgpu_utils Eigen3::Eigen)
+endif()
+
+if(NOT EMSCRIPTEN)
+    add_executable(validate_tiled experiments/validate_tiled.cpp src/gaussian.cpp src/camera.cpp)
+    target_compile_definitions(validate_tiled PRIVATE SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(validate_tiled PRIVATE tiled Eigen3::Eigen)
+endif()
+
+if(NOT EMSCRIPTEN)
+    add_executable(projection_benchmark experiments/projection_benchmark.cpp src/camera.cpp)
+    target_compile_definitions(projection_benchmark PRIVATE SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(projection_benchmark PRIVATE wgpu_utils Eigen3::Eigen)
+endif()
+
+if(NOT EMSCRIPTEN)
+    add_executable(space_benchmark experiments/space_benchmark.cpp src/camera.cpp)
+    target_compile_definitions(space_benchmark PRIVATE SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(space_benchmark PRIVATE wgpu_utils Eigen3::Eigen)
 endif()

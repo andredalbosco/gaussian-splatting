@@ -1,0 +1,59 @@
+GPU: NVIDIA GeForce RTX 4090
+CPU covariance validation failures: 0
+Image validation failures: 0
+render_10k_small
+  trial 1/7
+  trial 2/7
+  trial 3/7
+  trial 4/7
+  trial 5/7
+  trial 6/7
+  trial 7/7
+render_10k_large
+  trial 1/7
+  trial 2/7
+  trial 3/7
+  trial 4/7
+  trial 5/7
+  trial 6/7
+  trial 7/7
+render_100k_small
+  trial 1/7
+  trial 2/7
+  trial 3/7
+  trial 4/7
+  trial 5/7
+  trial 6/7
+  trial 7/7
+render_1m_small
+  trial 1/7
+  trial 2/7
+  trial 3/7
+  trial 4/7
+  trial 5/7
+  trial 6/7
+  trial 7/7
+vertex_math_10k
+  trial 1/7
+  trial 2/7
+  trial 3/7
+  trial 4/7
+  trial 5/7
+  trial 6/7
+  trial 7/7
+vertex_math_100k
+  trial 1/7
+  trial 2/7
+  trial 3/7
+  trial 4/7
+  trial 5/7
+  trial 6/7
+  trial 7/7
+vertex_math_1m
+  trial 1/7
+  trial 2/7
+  trial 3/7
+  trial 4/7
+  trial 5/7
+  trial 6/7
+  trial 7/7
