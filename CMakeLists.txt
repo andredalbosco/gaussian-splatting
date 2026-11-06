@@ -63,6 +63,7 @@ if(EMSCRIPTEN)
         "${CMAKE_CURRENT_SOURCE_DIR}/index.html"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/luigi.ply")
 else()
+    target_sources(gaussian_splatting PRIVATE src/benchmark.cpp)
     target_compile_definitions(gaussian_splatting PRIVATE SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(gaussian_splatting PRIVATE dawn::webgpu_dawn webgpu_glfw)
     target_link_libraries(imgui PUBLIC dawn::webgpu_dawn)

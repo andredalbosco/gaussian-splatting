@@ -154,6 +154,11 @@ wgpu::Adapter requestAdapter(const wgpu::Instance& instance, const wgpu::Surface
 wgpu::Device requestDevice(const wgpu::Instance& instance, const wgpu::Adapter& adapter) {
     wgpu::Device device;
     wgpu::DeviceDescriptor deviceDesc {};
+    wgpu::FeatureName timestampFeature = wgpu::FeatureName::TimestampQuery;
+    if (adapter.HasFeature(timestampFeature)) {
+        deviceDesc.requiredFeatureCount = 1;
+        deviceDesc.requiredFeatures = &timestampFeature;
+    }
     deviceDesc.SetUncapturedErrorCallback(
         [](const wgpu::Device&, wgpu::ErrorType, wgpu::StringView message) {
             std::cerr << std::string_view(message.data, message.length) << '\n';
