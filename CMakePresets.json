@@ -16,7 +16,23 @@
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
         "DAWN_USE_WAYLAND": "OFF",
+        "DAWN_SUPPORTS_CXX_MODULES": "OFF",
+        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
+      }
+    },
+    {
+      "name": "web",
+      "displayName": "Emscripten + Ninja",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-web",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
         "DAWN_SUPPORTS_CXX_MODULES": "OFF"
+      },
+      "environment": {
+        "EM_COMPILER_WRAPPER": "ccache"
       }
     }
   ],
@@ -24,6 +40,10 @@
     {
       "name": "default",
       "configurePreset": "default"
+    },
+    {
+      "name": "web",
+      "configurePreset": "web"
     }
   ]
 }

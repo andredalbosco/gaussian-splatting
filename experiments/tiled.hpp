@@ -1,6 +1,6 @@
 #pragma once
 
-#include "gaussian.hpp"
+#include "colored_gaussian.hpp"
 
 #include <array>
 #include <span>
@@ -25,7 +25,7 @@ struct TiledRenderer {
     bool statsReady = false, statsPending = false;
 
     void init(const wgpu::Device& device, wgpu::TextureFormat format);
-    void load(std::span<const Gaussian> data);
+    void load(std::span<const ColoredGaussian> data);
     void resize(uint32_t width, uint32_t height);
     void reservePairs(uint32_t capacity);
     void createBindGroup();

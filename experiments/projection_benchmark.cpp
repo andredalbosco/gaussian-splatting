@@ -1,5 +1,5 @@
 #include "camera.hpp"
-#include "gaussian.hpp"
+#include "colored_gaussian.hpp"
 #include "wgpu_utils.hpp"
 
 #include <Eigen/Geometry>
@@ -37,7 +37,7 @@ struct Workload { const char* name; uint32_t count; float radius; bool render; b
 struct Resources {
     wgpu::Buffer source, packed, output, camera;
     wgpu::BindGroup group, packedGroup, renderGroup, renderPackedGroup, preparedGroup;
-    std::vector<Gaussian> gaussians;
+    std::vector<ColoredGaussian> gaussians;
     CameraData cameraData;
 };
 
@@ -78,7 +78,7 @@ Resources makeResources(const wgpu::Device& device, const wgpu::BindGroupLayout&
     std::mt19937 rng(20261019);
     std::uniform_real_distribution<float> uniform(0,1), normal(-1,1);
     r.gaussians.resize(work.count);
-    std::vector<Gaussian> packed(work.count);
+    std::vector<ColoredGaussian> packed(work.count);
     Eigen::Matrix3f W = cam.view.block<3,3>(0,0);
     Eigen::Vector3f translation = cam.view.block<3,1>(0,3);
     for (auto& g : r.gaussians) {
@@ -97,7 +97,7 @@ Resources makeResources(const wgpu::Device& device, const wgpu::BindGroupLayout&
         g.rotation.normalize();
         g.color = {uniform(rng),uniform(rng),uniform(rng),0.15f+0.7f*uniform(rng)};
     }
-    std::sort(r.gaussians.begin(),r.gaussians.end(),[&](const Gaussian& a,const Gaussian& b) {
+    std::sort(r.gaussians.begin(),r.gaussians.end(),[&](const ColoredGaussian& a,const ColoredGaussian& b) {
         return (W*a.position.head<3>()).z() > (W*b.position.head<3>()).z();
     });
     for (size_t i=0;i<packed.size();i++) {
@@ -108,7 +108,7 @@ Resources makeResources(const wgpu::Device& device, const wgpu::BindGroupLayout&
         packed[i] = {g.position,{C(0,0),C(0,1),C(0,2),0},{C(1,1),C(1,2),C(2,2),0},g.color};
     }
     auto usage = wgpu::BufferUsage::Storage|wgpu::BufferUsage::CopyDst;
-    r.source = buffer(device,work.count*sizeof(Gaussian),usage);
+    r.source = buffer(device,work.count*sizeof(ColoredGaussian),usage);
     r.packed = buffer(device,r.source.GetSize(),usage);
     r.output = buffer(device,work.count*sizeof(Projected),usage|wgpu::BufferUsage::CopySrc);
     r.camera = buffer(device,sizeof(CameraData),wgpu::BufferUsage::Uniform|wgpu::BufferUsage::CopyDst);

@@ -41,15 +41,23 @@ std::vector<Gaussian> readPlyFile(const char* path) {
     size_t rotationOffset = offset("rot_0");
     size_t opacityOffset = offset("opacity");
 
+    size_t restCount = std::count_if(properties.begin(), properties.end(), [](const std::string& name) {
+        return name.starts_with("f_rest_");
+    }) / 3;
+    std::vector<size_t> restOffsets(3 * restCount);
+    for (size_t i = 0; i < restOffsets.size(); i++) {
+        restOffsets[i] = offset(("f_rest_" + std::to_string(i)).c_str());
+    }
+
     std::vector<float> row(properties.size());
     std::vector<Gaussian> gaussians(vertexCount);
 
-    for (Gaussian& gaussian : gaussians) {
+    for (size_t i = 0; i < vertexCount; i++) {
+        Gaussian& gaussian = gaussians[i];
         file.read(reinterpret_cast<char*>(row.data()), row.size() * sizeof(float));
 
         gaussian.position.head<3>() =
             Eigen::Map<const Eigen::Vector3f>(row.data() + positionOffset);
-        gaussian.position.w() = 0;
 
         gaussian.scale.head<3>() =
             Eigen::Map<const Eigen::Vector3f>(row.data() + scaleOffset).array().exp().matrix();
@@ -61,10 +69,14 @@ std::vector<Gaussian> readPlyFile(const char* path) {
         };
         gaussian.rotation = rotation.normalized().coeffs();
 
-        Eigen::Vector3f color = Eigen::Map<const Eigen::Vector3f>(row.data() + colorOffset);
-        gaussian.color.head<3>() =
-            (0.5f + 0.2820947918f * color.array()).max(0.0f).min(1.0f).matrix();
-        gaussian.color.w() = 1.0f / (1.0f + std::exp(-row[opacityOffset]));
+        for (size_t channel = 0; channel < 3; channel++) {
+            gaussian.sh.coefficients[0][channel] = row[colorOffset + channel];
+            for (size_t coefficient = 0; coefficient < std::min(restCount, size_t(15)); coefficient++) {
+                gaussian.sh.coefficients[coefficient + 1][channel] =
+                    row[restOffsets[channel * restCount + coefficient]];
+            }
+        }
+        gaussian.opacity = 1.0f / (1.0f + std::exp(-row[opacityOffset]));
     }
 
     return gaussians;

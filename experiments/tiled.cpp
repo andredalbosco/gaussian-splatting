@@ -1,4 +1,5 @@
 #include "tiled.hpp"
+#include "colored_gaussian.hpp"
 #include "wgpu_utils.hpp"
 
 #include <algorithm>
@@ -53,7 +54,7 @@ void TiledRenderer::init(const wgpu::Device& gpu, wgpu::TextureFormat format) {
     presentPipeline = device.CreateRenderPipeline(&desc);
 }
 
-void TiledRenderer::load(std::span<const Gaussian> data) {
+void TiledRenderer::load(std::span<const ColoredGaussian> data) {
     count = data.size();
     std::vector<PackedGaussian> packed(count);
     for (uint32_t i = 0; i < count; i++) {

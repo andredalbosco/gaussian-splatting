@@ -1,8 +1,8 @@
 # GPU radix sorting in the main renderer
 
 Historical snapshot before dispatch fusion and source reorganization. The original
-source hashes and measurements below describe that snapshot. The implementation now
-lives in `src/main.cpp`; see [the subsequent fusion results](../2026-10-19-radix-fusion/report.md)
+source hashes and measurements below describe that snapshot. The radix implementation now
+lives in `src/radix_sort.cpp`; see [the subsequent fusion results](../2026-10-19-radix-fusion/report.md)
 for the four-pipeline, 32-dispatch version. Current shader validators use the standalone
 `experiments/radix_validation.hpp` harness rather than including the app source.
 

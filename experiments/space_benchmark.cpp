@@ -1,5 +1,5 @@
 #include "camera.hpp"
-#include "gaussian.hpp"
+#include "colored_gaussian.hpp"
 #include "wgpu_utils.hpp"
 
 #include <Eigen/Geometry>
@@ -33,7 +33,7 @@ struct Workload { const char* name; uint32_t count; float radius; bool render; b
 struct Resources {
     wgpu::Buffer source, packed, output, camera;
     wgpu::BindGroup group, packedGroup, renderGroup, renderPackedGroup, preparedGroup;
-    std::vector<Gaussian> gaussians;
+    std::vector<ColoredGaussian> gaussians;
     CameraData cameraData;
 };
 
@@ -92,11 +92,11 @@ Resources makeResources(const wgpu::Device& device, const wgpu::BindGroupLayout&
         g.rotation.normalize();
         g.color = {uniform(rng),uniform(rng),uniform(rng),0.15f+0.7f*uniform(rng)};
     }
-    std::sort(r.gaussians.begin(),r.gaussians.end(),[&](const Gaussian& a,const Gaussian& b) {
+    std::sort(r.gaussians.begin(),r.gaussians.end(),[&](const ColoredGaussian& a,const ColoredGaussian& b) {
         return (W*a.position.head<3>()).z() > (W*b.position.head<3>()).z();
     });
     auto usage = wgpu::BufferUsage::Storage|wgpu::BufferUsage::CopyDst;
-    r.source = buffer(device,work.count*sizeof(Gaussian),usage);
+    r.source = buffer(device,work.count*sizeof(ColoredGaussian),usage);
     r.packed = r.source;
     r.output = buffer(device,work.count*sizeof(Projected),usage|wgpu::BufferUsage::CopySrc);
     r.camera = buffer(device,sizeof(CameraData),wgpu::BufferUsage::Uniform|wgpu::BufferUsage::CopyDst);

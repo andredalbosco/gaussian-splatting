@@ -1,5 +1,6 @@
+#include "camera.hpp"
 #include "gaussian.hpp"
-#include "radix_validation.hpp"
+#include "radix_sort.hpp"
 #include "wgpu_utils.hpp"
 
 #include <Eigen/Geometry>
@@ -26,7 +27,11 @@ int main(int argc, char** argv) {
     const char* disabled[] {"timestamp_quantization"};
     wgpu::DawnTogglesDescriptor toggles;
     toggles.disabledToggleCount = 1; toggles.disabledToggles = disabled;
+    wgpu::Limits limits {};
+    limits.maxStorageBufferBindingSize = 320 * 1024 * 1024;
+    limits.maxBufferSize = 320 * 1024 * 1024;
     wgpu::DeviceDescriptor desc {};
+    desc.requiredLimits = &limits;
     desc.nextInChain = &toggles; desc.requiredFeatureCount = 1; desc.requiredFeatures = &feature;
     desc.SetUncapturedErrorCallback([](const wgpu::Device&, wgpu::ErrorType, wgpu::StringView message) {
         std::cerr << std::string_view(message.data, message.length) << '\n'; std::exit(2);
@@ -36,9 +41,8 @@ int main(int argc, char** argv) {
         [&](wgpu::RequestDeviceStatus, wgpu::Device result, wgpu::StringView) { device = result; }), UINT64_MAX);
     auto queue = device.GetQueue();
     auto shader = readWgslFile(device, SRC_DIR "/shaders.wgsl");
-    RadixValidation sorter;
-    sorter.device = device;
-    sorter.createRadixPipelines(shader);
+    RadixSort sorter;
+    sorter.init(device, shader);
     auto buffer = [&](uint64_t bytes, wgpu::BufferUsage usage) {
         wgpu::BufferDescriptor d {.usage = usage, .size = std::max(uint64_t(64), bytes)};
         return device.CreateBuffer(&d);
@@ -72,23 +76,31 @@ int main(int argc, char** argv) {
                 const float values[] {0.0f, -0.0f, 1e30f, -1e30f, 1e-30f, -1e-30f, 1, -1};
                 depth = values[i % 8];
             }
-            data[i] = {{random(rng), random(rng), depth, 1}, {0.1f, 0.1f, 0.1f, 0}, {0, 0, 0, 1}, {1, 1, 1, 0.5f}};
+            data[i] = {{random(rng), random(rng), depth}, 0.5f, {0.1f, 0.1f, 0.1f, 0}, {0, 0, 0, 1}};
         }
         return data;
     };
     auto setup = [&](const std::vector<Gaussian>& data) {
-        auto input = buffer(data.size() * sizeof(Gaussian), wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
+        sorter.radixHistogramBindGroup = nullptr;
+        sorter.radixHistogramBindGroups = {};
+        sorter.radixScanBlocksBindGroups = {};
+        sorter.radixScanSumsBindGroups = {};
+        sorter.radixScatterBindGroups = {};
+        auto input = buffer(std::max(size_t(sizeof(Gaussian)), data.size() * sizeof(Gaussian)), wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
         auto output = buffer(data.size() * 4, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
         if (!data.empty()) queue.WriteBuffer(input, 0, data.data(), data.size() * sizeof(Gaussian));
-        sorter.gaussianBuffer = input;
-        sorter.cameraBuffer = cameraBuffer;
-        sorter.orderBuffer = output;
-        sorter.gaussianCount = data.size();
-        sorter.createRadixBuffers();
+        sorter.createBuffers(data.size());
+        sorter.createBindGroups(input, cameraBuffer, output);
         return std::pair {input, output};
     };
+    uint32_t maxCount = std::numeric_limits<uint32_t>::max();
+    if (const char* limit = std::getenv("RADIX_TEST_MAX_COUNT")) maxCount = std::strtoul(limit, nullptr, 10);
     int failures = 0;
     auto test = [&](uint32_t count, uint32_t pattern, bool rotated) {
+        if (count > maxCount) {
+            std::cout << "skipped count=" << count << " (RADIX_TEST_MAX_COUNT)" << std::endl;
+            return;
+        }
         auto data = makeData(count, pattern);
         auto [input, output] = setup(data);
         camera.view = Eigen::Matrix4f::Identity();
@@ -124,7 +136,7 @@ int main(int argc, char** argv) {
             }
         }
         for (int repeat = 0; repeat < 2; repeat++) {
-            encoder = device.CreateCommandEncoder(); sorter.recordRadix(encoder); submit(encoder);
+            encoder = device.CreateCommandEncoder(); sorter.recordCommands(encoder); submit(encoder);
             if (!count) continue;
             auto bytes = read(output, uint64_t(count) * 4);
             auto actual = reinterpret_cast<const uint32_t*>(bytes.data());
@@ -149,7 +161,7 @@ int main(int argc, char** argv) {
         auto [input, output] = setup(data);
         camera.view = Eigen::Matrix4f::Identity(); queue.WriteBuffer(cameraBuffer, 0, &camera, sizeof(camera));
         auto encoder = device.CreateCommandEncoder();
-        for (int warm = 0; warm < 4; warm++) sorter.recordRadix(encoder);
+        for (int warm = 0; warm < 4; warm++) sorter.recordCommands(encoder);
         submit(encoder);
         wgpu::QuerySetDescriptor qd {.type = wgpu::QueryType::Timestamp, .count = samples * 2};
         auto queries = device.CreateQuerySet(&qd);
@@ -158,7 +170,7 @@ int main(int argc, char** argv) {
         for (uint32_t sample = 0; sample < samples; sample++) {
             wgpu::PassTimestampWrites writes {.querySet = queries, .beginningOfPassWriteIndex = sample * 2,
                                               .endOfPassWriteIndex = sample * 2 + 1};
-            sorter.recordRadix(encoder, &writes);
+            sorter.recordCommands(encoder, &writes);
         }
         encoder.ResolveQuerySet(queries, 0, samples * 2, resolve, 0); submit(encoder);
         auto bytes = read(resolve, samples * 16);

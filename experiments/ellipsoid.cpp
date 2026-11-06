@@ -1,5 +1,5 @@
 #include "camera.hpp"
-#include "gaussian.hpp"
+#include "colored_gaussian.hpp"
 #include "glfw_utils.hpp"
 #include "imgui_utils.hpp"
 #include "wgpu_utils.hpp"
@@ -57,7 +57,7 @@ void EllipsoidExperiment::init() {
 
     wgpu::BufferDescriptor bufferDesc {
         .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst,
-        .size = sizeof(Gaussian),
+        .size = sizeof(ColoredGaussian),
     };
     shapeBuffer = device.CreateBuffer(&bufferDesc);
     bufferDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
@@ -75,7 +75,7 @@ void EllipsoidExperiment::init() {
     auto pipelineLayout = device.CreatePipelineLayout(&pipelineLayoutDesc);
     for (int i = 0; i < 4; i++) {
         wgpu::BindGroupEntry bindings[] {
-            {.binding = 0, .buffer = shapeBuffer, .size = sizeof(Gaussian)},
+            {.binding = 0, .buffer = shapeBuffer, .size = sizeof(ColoredGaussian)},
             {.binding = 1, .buffer = cameraBuffers[i], .size = 144},
         };
         wgpu::BindGroupDescriptor groupDesc {.layout = layout, .entryCount = 2, .entries = bindings};
@@ -169,12 +169,12 @@ void EllipsoidExperiment::draw() {
     Eigen::Quaternionf q = Eigen::AngleAxisf(radians.z(), Eigen::Vector3f::UnitZ()) *
         Eigen::AngleAxisf(radians.y(), Eigen::Vector3f::UnitY()) *
         Eigen::AngleAxisf(radians.x(), Eigen::Vector3f::UnitX());
-    Gaussian shape {{0, 0, 0, 1}, {scale.x(), scale.y(), scale.z(), 0}, q.coeffs(), {0.25f, 0.55f, 0.9f, opacity}};
+    ColoredGaussian shape {{0, 0, 0, 1}, {scale.x(), scale.y(), scale.z(), 0}, q.coeffs(), {0.25f, 0.55f, 0.9f, opacity}};
     auto queue = device.GetQueue();
     queue.WriteBuffer(shapeBuffer, 0, &shape, sizeof(shape));
     const char* titles[] {"1  Box + ellipsoid", "2  Quad + ellipsoid", "3  Projected ellipse", "4  Gaussian splat"};
     const char* subtitles[] {"36 vertices / exact ray intersection", "4 vertices / exact bounds + ray intersection",
-                             "4 vertices / local perspective approximation / 1 sigma", "4 vertices / Gaussian opacity / 3 sigma cutoff"};
+                             "4 vertices / local perspective approximation / 1 sigma", "4 vertices / ColoredGaussian opacity / 3 sigma cutoff"};
     const uint32_t header = std::min(uint32_t(112 * uiScale * io.DisplayFramebufferScale.y), config.height - 1);
     const uint32_t widths[] {config.width / 2, config.width - config.width / 2};
     const uint32_t heights[] {(config.height - header) / 2, config.height - header - (config.height - header) / 2};

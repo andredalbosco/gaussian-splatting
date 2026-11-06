@@ -1,5 +1,5 @@
 #include "camera.hpp"
-#include "gaussian.hpp"
+#include "colored_gaussian.hpp"
 #include "glfw_utils.hpp"
 #include "wgpu_utils.hpp"
 
@@ -35,7 +35,7 @@ struct Result {
 };
 struct Scene {
     std::string name;
-    std::vector<Gaussian> shapes;
+    std::vector<ColoredGaussian> shapes;
     OrbitCamera camera;
 };
 
@@ -221,7 +221,7 @@ int main(int argc, char* argv[]) {
 
     Eigen::Quaternionf q = Eigen::AngleAxisf(0.26f, Eigen::Vector3f::UnitZ()) *
         Eigen::AngleAxisf(0.61f, Eigen::Vector3f::UnitY()) * Eigen::AngleAxisf(0.35f, Eigen::Vector3f::UnitX());
-    Gaussian shape {{0, 0, 0, 1}, {0.9f, 0.2f, 0.05f, 0}, q.coeffs(), {0.25f, 0.55f, 0.9f, 0.85f}};
+    ColoredGaussian shape {{0, 0, 0, 1}, {0.9f, 0.2f, 0.05f, 0}, q.coeffs(), {0.25f, 0.55f, 0.9f, 0.85f}};
     std::vector<Scene> scenes;
     for (std::string name : {"sphere", "ellipsoid", "close", "offaxis"}) {
         Scene scene {name, {shape}, {}};
@@ -234,7 +234,7 @@ int main(int argc, char* argv[]) {
         Scene scene {sphere ? "grid_spheres" : "grid_ellipsoids", {}, {}};
         scene.camera.distance = 7;
         for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
-            Gaussian item = shape;
+            ColoredGaussian item = shape;
             item.position = {(x - 31.5f) * 0.08f, (y - 31.5f) * 0.08f, 0, 1};
             item.scale = sphere ? Eigen::Vector4f {0.03f, 0.03f, 0.03f, 0} : Eigen::Vector4f {0.035f, 0.008f, 0.002f, 0};
             scene.shapes.push_back(item);
@@ -245,9 +245,9 @@ int main(int argc, char* argv[]) {
     std::uniform_real_distribution<float> position(-2, 2), logScale(std::log(0.01f), std::log(0.12f));
     std::uniform_real_distribution<float> color(0.2f, 0.95f), opacity(0.1f, 0.9f);
     std::normal_distribution<float> normal;
-    std::vector<Gaussian> randomShapes;
+    std::vector<ColoredGaussian> randomShapes;
     for (int i = 0; i < 10000; i++) {
-        Gaussian item;
+        ColoredGaussian item;
         item.position = {position(sceneRandom), position(sceneRandom), position(sceneRandom), 1};
         item.scale = {std::exp(logScale(sceneRandom)), std::exp(logScale(sceneRandom)), std::exp(logScale(sceneRandom)), 0};
         item.rotation = Eigen::Vector4f {normal(sceneRandom), normal(sceneRandom), normal(sceneRandom), normal(sceneRandom)}.normalized();
@@ -259,7 +259,7 @@ int main(int argc, char* argv[]) {
         scene.camera.distance = close ? 3.8f : 7.5f;
         scenes.push_back(std::move(scene));
     }
-    auto luigi = readPlyFile(SRC_DIR "/../assets/luigi.ply");
+    auto luigi = readColoredPlyFile(ASSETS_DIR "/luigi.ply");
     Eigen::Vector3f lower = luigi[0].position.head<3>(), upper = lower;
     for (const auto& item : luigi) {
         lower = lower.cwiseMin(item.position.head<3>());
@@ -279,7 +279,7 @@ int main(int argc, char* argv[]) {
     for (auto size : {Extent2D {1280, 720}, Extent2D {2560, 1440}}) for (const auto& scene : scenes) {
         if (argc > 2 && !scene.name.starts_with(argv[2])) continue;
         wgpu::BufferDescriptor bufferDesc {.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst,
-                                          .size = scene.shapes.size() * sizeof(Gaussian)};
+                                          .size = scene.shapes.size() * sizeof(ColoredGaussian)};
         auto shapes = device.CreateBuffer(&bufferDesc);
         queue.WriteBuffer(shapes, 0, scene.shapes.data(), bufferDesc.size);
         bufferDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
@@ -291,7 +291,7 @@ int main(int argc, char* argv[]) {
         queue.WriteBuffer(camera, 0, vp.data(), 64);
         queue.WriteBuffer(camera, 64, eye.data(), 16);
         queue.WriteBuffer(camera, 80, inverse.data(), 64);
-        wgpu::BindGroupEntry bindings[] {{.binding = 0, .buffer = shapes, .size = scene.shapes.size() * sizeof(Gaussian)},
+        wgpu::BindGroupEntry bindings[] {{.binding = 0, .buffer = shapes, .size = scene.shapes.size() * sizeof(ColoredGaussian)},
                                         {.binding = 1, .buffer = camera, .size = 144}};
         wgpu::BindGroupDescriptor groupDesc {.layout = layout, .entryCount = 2, .entries = bindings};
         auto group = device.CreateBindGroup(&groupDesc);

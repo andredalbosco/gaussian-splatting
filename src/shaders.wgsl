@@ -16,10 +16,15 @@ const cov_blur = 0.3;
 const gaussian_extent = 3.0;
 
 struct Gaussian {
-    position: vec4f,
+    position: vec3f,
+    opacity: f32,
     scale: vec4f,
     rotation: vec4f,
-    color: vec4f,
+    sh: SHCoefficients,
+}
+
+struct SHCoefficients {
+    coefficients: array<vec4f, 16>,
 }
 
 struct Camera {
@@ -64,11 +69,44 @@ fn quat_to_matrix(q: vec4f) -> mat3x3f {
     );
 }
 
+fn evaluate_sh(sh: SHCoefficients, direction: vec3f) -> vec3f {
+    let x = direction.x;
+    let y = direction.y;
+    let z = direction.z;
+    let xx = x * x;
+    let yy = y * y;
+    let zz = z * z;
+    let basis = array<f32, 16>(
+        0.28209479177387814,
+        -0.4886025119029199 * y,
+        0.4886025119029199 * z,
+        -0.4886025119029199 * x,
+        1.0925484305920792 * x * y,
+        -1.0925484305920792 * y * z,
+        0.31539156525252005 * (2.0 * zz - xx - yy),
+        -1.0925484305920792 * x * z,
+        0.5462742152960396 * (xx - yy),
+        -0.5900435899266435 * y * (3.0 * xx - yy),
+        2.890611442640554 * x * y * z,
+        -0.4570457994644658 * y * (4.0 * zz - xx - yy),
+        0.3731763325901154 * z * (2.0 * zz - 3.0 * xx - 3.0 * yy),
+        -0.4570457994644658 * x * (4.0 * zz - xx - yy),
+        1.445305721320277 * z * (xx - yy),
+        -0.5900435899266435 * x * (xx - 3.0 * yy),
+    );
+    var color = vec3f(0.5);
+    for (var i = 0u; i < 16u; i++) {
+        color += basis[i] * sh.coefficients[i].xyz;
+    }
+    return max(color, vec3f(0));
+}
+
 @vertex
 fn vs_main(input: VSInput) -> VSOutput {
     var output: VSOutput;
 
-    let gaussian = gaussians[order[input.instance_index]];
+    let index = order[input.instance_index];
+    let gaussian = gaussians[index];
     let clip_pos = camera.view_projection * vec4f(gaussian.position.xyz, 1);
     let view_pos = (camera.view * vec4f(gaussian.position.xyz, 1)).xyz;
 
@@ -97,7 +135,9 @@ fn vs_main(input: VSInput) -> VSOutput {
     output.offset = quad_corners[input.vertex_index] * gaussian_extent * sqrt(vec2f(cov2d_xx, cov2d_yy));
     output.position = vec4f(clip_pos.xy + output.offset, clip_pos.zw);
     output.conic = vec3f(cov2d_yy, -cov2d_xy, cov2d_xx) / cov2d_det;
-    output.color = gaussian.color;
+
+    let direction = normalize(transpose(W) * view_pos);
+    output.color = vec4f(evaluate_sh(gaussian.sh, direction), gaussian.opacity);
 
     return output;
 }

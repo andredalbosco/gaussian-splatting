@@ -5,23 +5,24 @@ The tiled renderer is a separate experiment under `experiments/`. Each Gaussian 
 an elliptical footprint on the image. The vertex shader computes its projected shape;
 the fragment shader evaluates its opacity; blending combines it with the other splats.
 
-The current implementation loads Luigi, uses fixed per-Gaussian RGB colors, and sorts
+The current implementation loads Black Jacket, evaluates degree 0–3 spherical harmonics for per-Gaussian color, and sorts
 Gaussian centers on the GPU. It does not evaluate view-dependent spherical harmonics.
 
 ## 1. Data representation
 
-A Gaussian stores four vectors in [`Gaussian`](../src/gaussian.hpp):
+A [`Gaussian`](../src/gaussian.hpp) stores:
 
 | Field | Meaning |
 |---|---|
 | Position | World-space center, $\mu$ |
 | Scale | Three positive standard deviations, $s_x,s_y,s_z$ |
 | Rotation | Unit quaternion, stored as $(x,y,z,w)$ |
-| Color | Fixed RGB and peak opacity |
+| Opacity | Peak opacity, independent of color |
+| SH | 16 RGB coefficients defining directional color |
 
 [`readPlyFile`](../src/gaussian.cpp) decodes logarithmic scales with `exp`, opacity logits
-with the sigmoid function, and normalizes the quaternion. It converts the PLY's existing
-DC color coefficients to RGB once. Higher-order spherical harmonics are not used.
+with the sigmoid function, and normalizes the quaternion. It stores the PLY's DC and
+higher-order SH coefficients inside each Gaussian; the vertex shader evaluates RGB.
 
 Let $R$ be the rotation matrix corresponding to the quaternion and
 
@@ -210,7 +211,7 @@ peak contribution, rather than requiring each splat's integral to equal one.
 
 ## 7. Sorting and blending
 
-Transparent contributions depend on their order. `GaussianSplattingApp::recordRadixSort` records a compute
+Transparent contributions depend on their order. `RadixSort::recordCommands` records a compute
 pass before the render pass. It generates a center-depth key for each Gaussian using
 $f\cdot\mu$, where $f$ is the camera's forward direction, then sorts indices from far to
 near. Subtracting the camera position would add the same constant to every depth and
@@ -261,15 +262,16 @@ projected quad at the image edges.
 
 | File | Responsibility |
 |---|---|
-| [`src/gaussian.hpp`](../src/gaussian.hpp) | GPU-compatible Gaussian data |
-| [`src/gaussian.cpp`](../src/gaussian.cpp) | Gaussian PLY loading |
+| [`src/gaussian.hpp`](../src/gaussian.hpp) | Gaussian data and PLY reader declaration |
+| [`src/gaussian.cpp`](../src/gaussian.cpp) | PLY loading |
 | [`src/app.cpp`](../src/app.cpp) | Base application setup, frame loop, render pass, presentation |
 | [`src/glfw_utils.cpp`](../src/glfw_utils.cpp) | Window creation and framebuffer size |
 | [`src/imgui_utils.cpp`](../src/imgui_utils.cpp) | ImGui initialization, DPI scaling, shutdown |
 | [`src/wgpu_utils.cpp`](../src/wgpu_utils.cpp) | Device, surface, resizing, and shader loading |
 | [`src/utils.cpp`](../src/utils.cpp) | General file loading |
 | [`src/camera.cpp`](../src/camera.cpp) | View and perspective matrices |
-| [`src/main.cpp`](../src/main.cpp) | Gaussian application, radix sorting, draw commands, controls, and program entry point |
+| [`src/main.cpp`](../src/main.cpp) | GaussianSplattingApp, render setup, camera/UI, draw commands, and entry point |
+| [`src/radix_sort.cpp`](../src/radix_sort.cpp) | Radix pipeline/buffer/bind-group setup and compute dispatch recording |
 | [`src/shaders.wgsl`](../src/shaders.wgsl) | GPU radix sort, projected covariance, quad, Gaussian evaluation |
 | [`experiments/validate_splats.cpp`](../experiments/validate_splats.cpp) | Native numerical shader checks |
 
@@ -278,6 +280,10 @@ projected quad at the image edges.
 records its render passes, then `App` draws ImGui in a separate pass that loads the
 existing target contents. `GaussianSplattingApp::init()` initializes
 the base app and Gaussian pipeline without loading any Gaussians.
+`GaussianSplattingApp` owns the shared Gaussian, camera, and order buffers and uploads
+scene and camera data. The app also owns the render pipeline and bind group and records
+the Gaussian draw commands. `RadixSort` owns its compute
+pipelines and scratch buffers; the app connects both consumers to the shared buffers.
 `main()` loads the initial Gaussians with `loadGaussians(path)`, then calls the argument-free
 `run()` to start the frame loop. A later `loadGaussians(path)`
 replaces the Gaussian data, refreshes the scene buffers and bind group, reframes the camera,
@@ -337,3 +343,24 @@ counter readback grows storage. If device binding/dispatch limits prevent furthe
 growth, the UI reports the limit; reduce scene coverage or use the quad mode.
 
 Validation and initial timing scopes are documented in `experiments/TILED.md`.
+
+## View-dependent color
+
+Each `Gaussian` contains `SHCoefficients`: 16 RGB vectors padded to four floats.
+`f_dc_0..2` provide coefficient zero. The channel-major `f_rest_*` properties provide
+coefficients 1–15; missing degrees are zero-filled. The app uploads complete 304-byte Gaussian
+records, including SH, to `gaussianBuffer`. Opacity is stored separately from color, and RGB
+is evaluated entirely from SH. Position and opacity share the first 16 bytes; scale and rotation
+occupy the next 32 bytes, followed by 256 bytes of SH.
+
+`vs_main` projects each Gaussian and evaluates real SH through degree 3.
+DC-only experiments supply coefficient zero and zero-fill the remaining coefficients. It uses the normalized world-space direction from camera to Gaussian:
+`normalize(transpose(W) * view_pos)`, where `W` is the camera's world-to-view rotation.
+This rotates the view-space ray back to world space and includes camera translation through
+`view_pos`. Gaussian object rotation does not rotate the stored SH basis.
+
+RGB is `max(0.5 + sum(Y_i(direction) * coefficient_i), 0)` with no upper clamp before blending.
+The basis order, signs, and direction follow the
+[original renderer](https://github.com/graphdeco-inria/diff-gaussian-rasterization/blob/main/cuda_rasterizer/forward.cu#L17-L64).
+Luigi contains DC only; Black Jacket supplies real degree-3 coefficients. `validate_sh` checks
+loading and rendering against an independent associated-Legendre CPU implementation.

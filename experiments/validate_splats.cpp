@@ -1,6 +1,6 @@
 #include "camera.hpp"
-#include "gaussian.hpp"
-#include "radix_validation.hpp"
+#include "colored_gaussian.hpp"
+#include "radix_sort.hpp"
 #include "glfw_utils.hpp"
 #include "wgpu_utils.hpp"
 
@@ -18,9 +18,8 @@ int main() {
     auto device = requestDevice(instance, adapter);
     auto queue = device.GetQueue();
     auto shader = readWgslFile(device, SRC_DIR "/shaders.wgsl");
-    RadixValidation radixSort;
-    radixSort.device = device;
-    radixSort.createRadixPipelines(shader);
+    RadixSort radixSort;
+    radixSort.init(device, shader);
     wgpu::BlendState blend {
         .color = {.srcFactor = wgpu::BlendFactor::One, .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
         .alpha = {.srcFactor = wgpu::BlendFactor::One, .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
@@ -43,7 +42,7 @@ int main() {
             view.block<3, 1>(0, 3) = Eigen::Vector3f(0.1f, -0.2f, 0.1f);
         }
         Eigen::Matrix4f vp = projection * view;
-        std::vector<Gaussian> shapes {
+        std::vector<ColoredGaussian> shapes {
             {{0, 0, 2, 1}, {0.2f, 0.2f, 0.2f, 0}, {0, 0, 0, 1}, {1, 0, 0, 0.5f}},
         };
         if (test == 1) shapes.push_back({{0, 0, 3, 1}, {0.3f, 0.3f, 0.3f, 0}, {0, 0, 0, 1}, {0, 0, 1, 0.5f}});
@@ -62,10 +61,11 @@ int main() {
         std::vector<uint32_t> order(shapes.size());
         std::iota(order.begin(), order.end(), 0u);
         std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return shapes[a].position.z() > shapes[b].position.z(); });
+        auto gpuShapes = toGaussians(shapes);
         wgpu::BufferDescriptor bufferDesc {.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst,
-                                          .size = shapes.size() * sizeof(Gaussian)};
+                                          .size = gpuShapes.size() * sizeof(Gaussian)};
         auto shapeBuffer = device.CreateBuffer(&bufferDesc);
-        queue.WriteBuffer(shapeBuffer, 0, shapes.data(), bufferDesc.size);
+        queue.WriteBuffer(shapeBuffer, 0, gpuShapes.data(), bufferDesc.size);
         bufferDesc.size = order.size() * sizeof(uint32_t);
         auto orderBuffer = device.CreateBuffer(&bufferDesc);
         bufferDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
@@ -75,11 +75,8 @@ int main() {
         queue.WriteBuffer(cameraBuffer, 0, vp.data(), 64);
         queue.WriteBuffer(cameraBuffer, 64, view.data(), 64);
         queue.WriteBuffer(cameraBuffer, 128, viewport.data(), 16);
-        radixSort.gaussianBuffer = shapeBuffer;
-        radixSort.cameraBuffer = cameraBuffer;
-        radixSort.orderBuffer = orderBuffer;
-        radixSort.gaussianCount = shapes.size();
-        radixSort.createRadixBuffers();
+        radixSort.createBuffers(shapes.size());
+        radixSort.createBindGroups(shapeBuffer, cameraBuffer, orderBuffer);
         wgpu::BindGroupEntry entries[] {
             {.binding = 0, .buffer = shapeBuffer, .size = shapeBuffer.GetSize()},
             {.binding = 1, .buffer = cameraBuffer, .size = cameraBuffer.GetSize()},
@@ -94,7 +91,7 @@ int main() {
                                               .storeOp = wgpu::StoreOp::Store, .clearValue = {0, 0, 0, 0}};
         wgpu::RenderPassDescriptor passDesc {.colorAttachmentCount = 1, .colorAttachments = &color};
         auto encoder = device.CreateCommandEncoder();
-        radixSort.recordRadix(encoder);
+        radixSort.recordCommands(encoder);
         auto pass = encoder.BeginRenderPass(&passDesc);
         pass.SetPipeline(pipeline);
         pass.SetBindGroup(0, group);

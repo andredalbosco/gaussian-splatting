@@ -1,5 +1,5 @@
 #include "camera.hpp"
-#include "gaussian.hpp"
+#include "colored_gaussian.hpp"
 #include "tiled.hpp"
 #include "wgpu_utils.hpp"
 
@@ -60,7 +60,7 @@ int main() {
         Eigen::Matrix4f view = Eigen::Matrix4f::Identity();
         Eigen::Matrix4f projection = projectionMatrix(60, float(w)/h, 0.1f, 20);
         Eigen::Matrix4f vp = projection;
-        std::vector<Gaussian> data {{{0,0,2,1},{0.2f,0.2f,0.2f,0},{0,0,0,1},{0.8f,0.2f,0.1f,0.5f}}};
+        std::vector<ColoredGaussian> data {{{0,0,2,1},{0.2f,0.2f,0.2f,0},{0,0,0,1},{0.8f,0.2f,0.1f,0.5f}}};
         if (test == 0) data.clear();
         if (test == 2 || test == 3) {
             data.push_back({{0,0,test == 2 ? 3.0f : 2.0f,1},{0.3f,0.3f,0.3f,0},{0,0,0,1},{0,0.2f,1,0.6f}});
@@ -89,7 +89,7 @@ int main() {
                 {0,0,0,1},{0.3f,0.6f,0.9f,0.8f}});
         }
         if (test == 9) {
-            data = readPlyFile(SRC_DIR "/../assets/luigi.ply");
+            data = readColoredPlyFile(ASSETS_DIR "/luigi.ply");
             OrbitCamera camera;
             Eigen::AlignedBox3f bounds;
             for (const auto& g : data) bounds.extend(g.position.head<3>());
@@ -118,11 +118,12 @@ int main() {
             float zb = (vp * Eigen::Vector4f(data[b].position.x(), data[b].position.y(), data[b].position.z(), 1)).w();
             return za == zb ? a < b : za > zb;
         });
-        auto source = buffer(std::max(uint64_t(64), uint64_t(data.size()*sizeof(Gaussian))),
+        auto gpuData = toGaussians(data);
+        auto source = buffer(std::max(uint64_t(sizeof(Gaussian)), uint64_t(gpuData.size()*sizeof(Gaussian))),
                              wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
         auto indices = buffer(order.size()*4, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
         auto camera = buffer(144, wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst);
-        queue.WriteBuffer(source, 0, data.data(), data.size()*sizeof(Gaussian));
+        queue.WriteBuffer(source, 0, gpuData.data(), gpuData.size()*sizeof(Gaussian));
         queue.WriteBuffer(indices, 0, order.data(), order.size()*4);
         queue.WriteBuffer(camera, 0, vp.data(), 64);
         Eigen::Vector4f viewport {float(w), float(h),projection(0,0),projection(1,1)};

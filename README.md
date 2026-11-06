@@ -2,9 +2,11 @@
 
 Gaussian splatting using WebGPU through Dawn.
 The math and rendering stages are explained in [docs/gaussian_splatting.md](docs/gaussian_splatting.md).
-`src/main.cpp` loads Luigi and renders Gaussian quads using `src/shaders.wgsl`.
+`src/main.cpp` defines the app and renders Gaussian quads
+using `src/shaders.wgsl`; GPU radix setup and recording live in `src/radix_sort.cpp`.
+`GaussianSplattingApp` owns the render pipeline, scene buffers, camera uploads, and `RadixSort` in `main.cpp`.
 Experimental renderers and benchmarks live in `experiments/`.
-`GaussianSplattingApp` derives from `App` in `src/app.hpp` and `src/app.cpp`, which handles window/device setup,
+`GaussianSplattingApp` is defined in `src/main.cpp` and derives from `App` in `src/app.hpp` and `src/app.cpp`, which handles window/device setup,
 the frame loop, UI frames, and presentation. GLFW, ImGui, and WebGPU helpers live in
 `src/glfw_utils.cpp`, `src/imgui_utils.cpp`, and `src/wgpu_utils.cpp`; general helpers stay in `src/utils.cpp`.
 Orbit camera and view/projection math live in `src/camera.hpp` and `src/camera.cpp`.
@@ -18,8 +20,25 @@ cmake --build --preset default --target gaussian_splatting -j 8
 ./build/gaussian_splatting
 ```
 
-The default preset uses Clang, Ninja, a Release build, and `build/`.
-`compile_commands.json` is exposed at the repository root for clangd.
+The default preset uses Clang, ccache, Ninja, a Release build, and `build/`.
+The browser build also uses ccache through `EM_COMPILER_WRAPPER`.
+The watcher uses `watchexec` for native filesystem events, debouncing, and process-group restarts.
+CMake runs for the first watcher configuration or a changed preset; Ninja regenerates when CMake files change.
+Inspect cache statistics with `ccache --show-stats`.
+`build/compile_commands.json` is the compilation database; `.clangd` points to `build/`.
+`SRC_DIR` points to `src/`; `ASSETS_DIR` points to `assets/`, including in the browser filesystem.
+
+The root `CMakeLists.txt` defines the app and shared libraries.
+`experiments/CMakeLists.txt` defines optional experiment targets, excluded from the default build.
+Build an experiment explicitly, for example `ninja -C build ellipsoid`.
+Shell scripts live in `scripts/`; `./scripts/watch.sh` rebuilds and restarts the native app.
+Install `watchexec` in your PATH (for example, `cargo install watchexec-cli`).
+An edit stops the app, builds with Ninja, and launches the new executable if the build succeeds.
+Failed builds wait for the next edit or manual restart. Exiting the watcher stops its process group.
+Press **r** to rebuild/relaunch, **s** to stop the app, or **q** to quit. Running `watch.sh` again asks the existing watcher to
+relaunch instead of starting a second one. It inherits your display; for Moonlight on blacknoir,
+use `DISPLAY=:101 XAUTHORITY="$HOME/.Xauthority" ./scripts/watch.sh`.
+`./scripts/deploy-web.sh` publishes browser artifacts to the `web` branch.
 
 The first configure downloads Dawn's pinned dependencies, including GLFW.
 
@@ -34,31 +53,32 @@ DISPLAY=:101 XAUTHORITY="$HOME/.Xauthority" ./build/gaussian_splatting
 
 Drag with the left mouse button to orbit, and scroll to zoom.
 The window can be resized; close it to exit.
-Dear ImGui 1.93.0 provides a live camera panel with FOV, clipping planes, orbit/zoom sensitivity,
-angles, explicit world-space distance limits, and a reset button. UI interaction captures the mouse.
+Dear ImGui 1.93.0 displays Gaussian count, frame timing, and a FOV control. UI interaction captures the mouse.
 Scene bounds and initial framing are computed by `GaussianSplattingApp`; `OrbitCamera` only handles camera state and controls.
 `--capture` renders one frame and exits.
 
 ## Browser build
 
-With Emscripten activated, use a fresh `build/` when switching between native and browser toolchains:
+With Emscripten activated, build separately in `build-web/`:
 
 ```sh
-emcmake cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target gaussian_splatting -j 8
-python3 -m http.server 8080 --bind 127.0.0.1 --directory build
+./scripts/build-web.sh
+python3 -m http.server 8080 --bind 127.0.0.1 --directory build-web
 ```
 
 Open `http://localhost:8080/` in a WebGPU-enabled browser.
 The browser build uses Pongasoft GLFW through `--use-port=contrib.glfw3`.
 `MakeCanvasResizable` fills the browser window and the port handles HiDPI scaling.
-The custom `src/index.html` contains only a canvas that fills the page.
-The build packages `src/shaders.wgsl` and `assets/luigi.ply` into the browser filesystem; rebuild after asset edits.
+The custom `index.html` contains only a canvas that fills the page.
+The build packages `src/shaders.wgsl`, Black Jacket, and Luigi into the browser filesystem; rebuild after asset edits.
 For remote hosting, serve over HTTPS.
 
 ## Sample scene
 
-`assets/luigi.ply` contains 14,526 Gaussians. Source details are in `assets/README.md`.
+The default scene, `assets/black_jacket.ply`, contains 41,470 Gaussians with degree-3 SH.
+Choose Black Jacket or Luigi from the ImGui **Asset** dropdown. Switching reloads buffers,
+resets camera framing, and rebuilds the sorted order.
+Source details and attribution are in `assets/README.md`.
 `readPlyFile` in `src/gaussian.cpp` reads binary little-endian Gaussian PLY files with float properties,
 including position, SH DC color, opacity, logarithmic scale, and quaternion rotation.
 
@@ -71,14 +91,16 @@ The fragment shader evaluates `opacity * exp(-0.5 * q)` using the inverse covari
 truncates at 3 sigma, caps alpha at 0.99, and discards contributions below 1/255.
 
 Compute shaders sort Gaussian indices by signed center depth, far to near, when the view
-direction changes. `GaussianSplattingApp::recordRadixSort` in `src/main.cpp` records eight stable four-bit radix passes before the render pass.
+direction changes. `RadixSort::recordCommands` in `src/radix_sort.cpp` records eight stable four-bit radix passes before the render pass.
 The first histogram generates depth keys; the final scatter writes sorted indices directly. Equal depths retain
 source-index order. The GPU writes the `order` buffer directly; there is no CPU sort,
 sorted-index upload, or readback in the viewer.
 Premultiplied-alpha blending composites the splats without depth writes or a depth attachment.
 Center-depth ordering is an approximation for overlapping extended Gaussians.
-Colors are fixed RGB decoded from the PLY's DC coefficients; no view-dependent spherical
-harmonics are evaluated. Projection is the local perspective approximation discussed in
+Colors use degree 0–3 spherical harmonics decoded from `f_dc_*` and `f_rest_*` PLY properties.
+The vertex shader evaluates them along the world-space camera-to-Gaussian direction.
+Missing bands are zero, and colors are clamped only below zero after evaluation.
+`vs_main` evaluates SH for every rendered Gaussian. DC-only experiment scenes supply only coefficient zero. Projection is the local perspective approximation discussed in
 [the ellipsoid experiments](experiments/BENCHMARKS.md).
 
 The native shader validation compares GPU images with an independent CPU reference using
@@ -92,8 +114,7 @@ VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json ./build/validate_splats
 ```
 
 The six cases use GPU-generated order and pass with at most 1/255 channel error.
-The validators exercise the current shader through the headless harness in
-`experiments/radix_validation.hpp`. Native validation and a one-frame main-app run pass
+The validators exercise the production `RadixSort` implementation directly. Native validation and a one-frame main-app run pass
 on the RTX 4090; the Emscripten build also passes. Browser runtime was not rechecked
 after the radix fusion.
 
@@ -109,6 +130,7 @@ cmake --build build --target validate_radix_sort -j 8
 VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json ./build/validate_radix_sort
 ```
 
+Set `RADIX_TEST_MAX_COUNT=100000` for validation when GPU memory is occupied; larger cases are reported as skipped.
 The validation checks CPU-reference index order, equal-depth stability, signed depths,
 rotated cameras, repeated sorting, and counts crossing workgroup/prefix boundaries up to
 1,048,577 Gaussians. Optional timing results are written when an output directory is supplied;
@@ -177,3 +199,21 @@ cmake --build --preset default --target tiled_viewer validate_tiled -j 16
 ./build/tiled_viewer
 ./build/validate_tiled
 ```
+
+## Spherical harmonics
+
+Each `Gaussian` stores position, opacity, scale, rotation, and 16 SH RGB coefficients
+padded to `vec4f`. The combined record is 304 bytes. There is no redundant RGB color or separate SH buffer.
+Older color-based experiments retain a separate `ColoredGaussian` layout. The PLY reader converts channel-major `f_rest_*` values to coefficient-major RGB.
+Luigi has only DC; `assets/black_jacket.ply` has full degree-3 SH (41,470 Gaussians, 10.3 MB).
+See [asset attribution](assets/README.md).
+
+```sh
+ninja -C build validate_sh
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json ./build/validate_sh
+```
+
+The validator checks degree 0–3 PLY loading, all 16 GPU basis terms from five camera directions,
+negative/HDR colors, and coefficients loaded from Black Jacket. Its CPU reference uses an
+associated-Legendre recurrence rather than the shader polynomials.
+The basis, direction, and lower-only color clamp follow [original 3DGS](https://github.com/graphdeco-inria/diff-gaussian-rasterization/blob/main/cuda_rasterizer/forward.cu#L17-L64).

@@ -1,6 +1,6 @@
 #include "app.hpp"
 #include "camera.hpp"
-#include "gaussian.hpp"
+#include "colored_gaussian.hpp"
 #include "tiled.hpp"
 #include "wgpu_utils.hpp"
 
@@ -26,7 +26,7 @@ struct GSplatApp : App {
     wgpu::Buffer orderBuffer;
     wgpu::Buffer cameraBuffer;
 
-    std::vector<Gaussian> gaussians;
+    std::vector<ColoredGaussian> gaussians;
     uint32_t gaussianCount;
     Eigen::AlignedBox3f bounds;
 
@@ -65,7 +65,7 @@ bool GSplatApp::init() {
 }
 
 bool GSplatApp::loadGaussians(const char* path) {
-    auto newGaussians = readPlyFile(path);
+    auto newGaussians = readColoredPlyFile(path);
     if (newGaussians.empty()) return false;
     gaussians = std::move(newGaussians);
 
@@ -73,7 +73,7 @@ bool GSplatApp::loadGaussians(const char* path) {
     std::cout << "Loaded " << gaussianCount << " Gaussians\n";
 
     bounds.setEmpty();
-    for (const Gaussian& gaussian : gaussians) {
+    for (const ColoredGaussian& gaussian : gaussians) {
         bounds.extend(gaussian.position.head<3>());
     }
     resetCamera();
@@ -119,16 +119,13 @@ void GSplatApp::createPipeline() {
 }
 
 void GSplatApp::createBuffers() {
+    auto gpuGaussians = toGaussians(gaussians);
     wgpu::BufferDescriptor gaussianBufferDesc {
         .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst,
-        .size = gaussians.size() * sizeof(Gaussian),
+        .size = gpuGaussians.size() * sizeof(Gaussian),
     };
     gaussianBuffer = device.CreateBuffer(&gaussianBufferDesc);
-    queue.WriteBuffer(gaussianBuffer, 0, gaussians.data(), gaussianBufferDesc.size);
-
-    order.resize(gaussianCount);
-    depths.resize(gaussianCount);
-    std::iota(order.begin(), order.end(), 0u);
+    queue.WriteBuffer(gaussianBuffer, 0, gpuGaussians.data(), gaussianBufferDesc.size);
 
     wgpu::BufferDescriptor orderBufferDesc {
         .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst,
@@ -299,7 +296,7 @@ void GSplatApp::onScroll(double, double y) {
 int main(int argc, char* argv[]) {
     static GSplatApp app {};
     if (!app.init()) return 1;
-    if (!app.loadGaussians(SRC_DIR "/../assets/luigi.ply")) {
+    if (!app.loadGaussians(ASSETS_DIR "/luigi.ply")) {
         app.shutdown();
         return 1;
     }
