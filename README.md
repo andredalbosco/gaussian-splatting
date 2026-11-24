@@ -7,7 +7,7 @@ Main features:
 - View dependent color through spherical harmonics.
 - Interactive orbit and zoom.
 
-One notable feature is that we use hardware rasterization, instead of rendering in a compute shader/kernel (which also ends up needing tiling). The compute only renderer is very useful when you want it to be differentiable, but for viewing only purposes, this is not needed, and it's simpler to rely on the good old hardware rendering pipeline.
+One notable feature is that we use hardware rasterization, instead of rendering in a compute shader/kernel (and thus no need for tiling). The compute renderer is very useful when you want it to be differentiable, which we don't need since we implement only a viewer.
 
 ## References
 - [3D Gaussian Splatting for Real-Time Radiance Field Rendering (Kerbl et al. 2023)](https://arxiv.org/abs/2308.04079)

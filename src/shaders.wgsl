@@ -171,6 +171,7 @@ fn prefix_sum(value: u32, lane: u32) -> vec2u {
         scan_values[lane] += add;
         workgroupBarrier();
     }
+
     return vec2u(scan_values[lane] - value, scan_values[255]);
 }
 
@@ -181,7 +182,10 @@ fn depth_key(depth: f32) -> u32 {
 }
 
 @compute @workgroup_size(256)
-fn radix_histogram_rank(@builtin(local_invocation_index) lane: u32, @builtin(workgroup_id) group: vec3u) {
+fn radix_histogram_rank(
+    @builtin(local_invocation_index) lane: u32,
+    @builtin(workgroup_id) group: vec3u
+) {
     if (lane < 128u) {
         atomicStore(&digit_masks[lane], 0u);
     }
@@ -228,14 +232,27 @@ fn radix_histogram_rank(@builtin(local_invocation_index) lane: u32, @builtin(wor
 }
 
 @compute @workgroup_size(256)
-fn radix_scan_blocks(@builtin(local_invocation_index) lane: u32, @builtin(workgroup_id) group: vec3u) {
+fn radix_scan_blocks(
+    @builtin(local_invocation_index) lane: u32,
+    @builtin(workgroup_id) group: vec3u
+) {
     let index = group.x * 256u + lane;
     let digit = group.y;
+
     var value = 0u;
-    if (index < radix_params.group_count) { value = radix_histogram[digit * radix_params.group_count + index]; }
+    if (index < radix_params.group_count) {
+        value = radix_histogram[digit * radix_params.group_count + index];
+    }
+
     let result = prefix_sum(value, lane);
-    if (index < radix_params.group_count) { radix_histogram[digit * radix_params.group_count + index] = result.x; }
-    if (lane == 0u) { radix_block_offsets[digit * radix_params.block_count + group.x] = result.y; }
+
+    if (index < radix_params.group_count) {
+        radix_histogram[digit * radix_params.group_count + index] = result.x;
+    }
+
+    if (lane == 0u) {
+        radix_block_offsets[digit * radix_params.block_count + group.x] = result.y;
+    }
 }
 
 @compute @workgroup_size(16)
