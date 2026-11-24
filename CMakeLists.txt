@@ -89,5 +89,3 @@ if(EMSCRIPTEN)
         "${PROJECT_SOURCE_DIR}/assets/black_jacket.ply"
         "${PROJECT_SOURCE_DIR}/assets/luigi.ply")
 endif()
-
-add_subdirectory(experiments EXCLUDE_FROM_ALL)

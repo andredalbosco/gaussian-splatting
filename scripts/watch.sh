@@ -17,11 +17,11 @@ echo "Watching with watchexec. Press r to relaunch, q or Ctrl+C to stop. DISPLAY
 exec watchexec "${interactive[@]}" --restart --debounce 250ms --fs-events modify,create,remove,rename --stop-timeout 2s \
     --no-vcs-ignore --shell bash \
     --watch src --watch assets --watch CMakeLists.txt \
-    --watch experiments/CMakeLists.txt --watch CMakePresets.json --watch index.html \
+    --watch CMakePresets.json --watch index.html \
     --watch build/.watch-restart \
     --filter '**/src/**' --filter '**/assets/**' --filter '**/CMakeLists.txt' \
     --filter '**/CMakePresets.json' --filter '**/index.html' \
-    --filter '**/experiments/CMakeLists.txt' --filter '**/build/.watch-restart' -- '
+    --filter '**/build/.watch-restart' -- '
         if [[ ! -f build/build.ninja ]] || ! cmp -s CMakePresets.json build/.watch-preset; then
             cmake --preset default && cp CMakePresets.json build/.watch-preset || exit 1
         fi
