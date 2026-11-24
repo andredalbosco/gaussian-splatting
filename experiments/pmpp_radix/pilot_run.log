@@ -1,0 +1,72 @@
+luigi count=14526 view=0 masks errors=0
+luigi count=14526 view=0 pmpp_local errors=0
+trial=0 masks ms=0.053248
+trial=0 pmpp_local ms=0.075776
+trial=1 pmpp_local ms=0.075776
+trial=1 masks ms=0.053248
+trial=2 masks ms=0.053248
+trial=2 pmpp_local ms=0.075776
+trial=3 pmpp_local ms=0.075776
+trial=3 masks ms=0.053248
+trial=4 masks ms=0.053248
+trial=4 pmpp_local ms=0.075776
+luigi count=14526 view=1 masks errors=0
+luigi count=14526 view=1 pmpp_local errors=0
+trial=0 masks ms=0.053248
+trial=0 pmpp_local ms=0.075776
+trial=1 pmpp_local ms=0.075776
+trial=1 masks ms=0.053248
+trial=2 masks ms=0.053248
+trial=2 pmpp_local ms=0.075776
+trial=3 pmpp_local ms=0.075776
+trial=3 masks ms=0.053248
+trial=4 masks ms=0.053248
+trial=4 pmpp_local ms=0.075776
+luigi count=14526 view=2 masks errors=0
+luigi count=14526 view=2 pmpp_local errors=0
+trial=0 masks ms=0.053248
+trial=0 pmpp_local ms=0.075776
+trial=1 pmpp_local ms=0.075776
+trial=1 masks ms=0.053248
+trial=2 masks ms=0.053248
+trial=2 pmpp_local ms=0.075776
+trial=3 pmpp_local ms=0.075776
+trial=3 masks ms=0.053248
+trial=4 masks ms=0.053248
+trial=4 pmpp_local ms=0.075776
+black_jacket count=41470 view=0 masks errors=0
+black_jacket count=41470 view=0 pmpp_local errors=0
+trial=0 masks ms=0.055296
+trial=0 pmpp_local ms=0.080896
+trial=1 pmpp_local ms=0.080896
+trial=1 masks ms=0.052224
+trial=2 masks ms=0.052224
+trial=2 pmpp_local ms=0.075776
+trial=3 pmpp_local ms=0.075776
+trial=3 masks ms=0.052224
+trial=4 masks ms=0.052224
+trial=4 pmpp_local ms=0.075776
+black_jacket count=41470 view=1 masks errors=0
+black_jacket count=41470 view=1 pmpp_local errors=0
+trial=0 masks ms=0.052224
+trial=0 pmpp_local ms=0.075776
+trial=1 pmpp_local ms=0.075776
+trial=1 masks ms=0.052224
+trial=2 masks ms=0.052224
+trial=2 pmpp_local ms=0.075776
+trial=3 pmpp_local ms=0.075776
+trial=3 masks ms=0.052224
+trial=4 masks ms=0.052224
+trial=4 pmpp_local ms=0.075776
+black_jacket count=41470 view=2 masks errors=0
+black_jacket count=41470 view=2 pmpp_local errors=0
+trial=0 masks ms=0.052224
+trial=0 pmpp_local ms=0.075776
+trial=1 pmpp_local ms=0.075776
+trial=1 masks ms=0.052224
+trial=2 masks ms=0.052224
+trial=2 pmpp_local ms=0.075776
+trial=3 pmpp_local ms=0.075776
+trial=3 masks ms=0.052224
+trial=4 masks ms=0.052224
+trial=4 pmpp_local ms=0.0768
