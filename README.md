@@ -12,7 +12,7 @@ One notable feature is that we use hardware rasterization, instead of rendering 
 ## References
 - [3D Gaussian Splatting for Real-Time Radiance Field Rendering (Kerbl et al. 2023)](https://arxiv.org/abs/2308.04079)
 - [EWA Volume Splatting (Zwicker et al. 2001)](https://www.cs.umd.edu/~zwicker/publications/EWAVolumeSplatting-VIS01.pdf)
-- [gsplat](https://github.com/nerfstudio-project/gsplat)
-- [graphdeco-inria/diff-gaussian-rasterization](https://github.com/graphdeco-inria/diff-gaussian-rasterization), [graphdeco-inria/gaussian-splatting](https://github.com/graphdeco-inria/gaussian-splatting)
 - Programming Massively Parallel Processors, 5th ed. (Radix Sort)
-- [NVIDIA CCCL (CUB)](https://github.com/nvidia/cccl)
+- [nerfstudio-project/gsplat](https://github.com/nerfstudio-project/gsplat)
+- [graphdeco-inria/diff-gaussian-rasterization](https://github.com/graphdeco-inria/diff-gaussian-rasterization), [graphdeco-inria/gaussian-splatting](https://github.com/graphdeco-inria/gaussian-splatting)
+- [nvidia/cccl](https://github.com/nvidia/cccl)

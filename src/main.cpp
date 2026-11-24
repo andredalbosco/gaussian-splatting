@@ -8,7 +8,7 @@
 #include <cmath>
 #include <iostream>
 #include <string_view>
-#include <utility>
+#include <vector>
 
 #include <Eigen/Geometry>
 #include <GLFW/glfw3.h>
@@ -31,7 +31,6 @@ struct GaussianSplattingApp : App {
     uint32_t gaussianCount;
     int assetIndex = 0;
 
-    std::vector<Gaussian> gaussians;
     Eigen::AlignedBox3f bounds;
     Eigen::Vector3f lastSortDirection = Eigen::Vector3f::Zero();
     Eigen::Vector2d mouse = Eigen::Vector2d::Zero();
@@ -42,7 +41,7 @@ struct GaussianSplattingApp : App {
     bool init();
     bool loadGaussians(const char* path);
     void createPipelines(const wgpu::ShaderModule& shader, wgpu::TextureFormat format);
-    void createBuffers();
+    void createBuffers(const std::vector<Gaussian>& gaussians);
     void createBindGroups();
     void updateCameraBuffer();
 
@@ -63,9 +62,8 @@ bool GaussianSplattingApp::init() {
 }
 
 bool GaussianSplattingApp::loadGaussians(const char* path) {
-    auto newGaussians = readPlyFile(path);
-    if (newGaussians.empty()) return false;
-    gaussians = std::move(newGaussians);
+    const auto gaussians = readPlyFile(path);
+    if (gaussians.empty()) return false;
 
     std::cout << "Loaded " << gaussians.size() << " Gaussians\n";
 
@@ -74,7 +72,7 @@ bool GaussianSplattingApp::loadGaussians(const char* path) {
         bounds.extend(gaussian.position.head<3>());
     }
     resetCamera();
-    createBuffers();
+    createBuffers(gaussians);
     createBindGroups();
 
     return true;
@@ -112,7 +110,7 @@ void GaussianSplattingApp::createPipelines(const wgpu::ShaderModule& shader, wgp
     radixSort.init(device, shader);
 }
 
-void GaussianSplattingApp::createBuffers() {
+void GaussianSplattingApp::createBuffers(const std::vector<Gaussian>& gaussians) {
     gaussianCount = gaussians.size();
     wgpu::BufferDescriptor gaussianBufferDesc {
         .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst,
