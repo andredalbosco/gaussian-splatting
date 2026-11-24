@@ -15,3 +15,4 @@ One notable feature is that we use hardware rasterization, instead of rendering 
 - [gsplat](https://github.com/nerfstudio-project/gsplat)
 - [graphdeco-inria/diff-gaussian-rasterization](https://github.com/graphdeco-inria/diff-gaussian-rasterization), [graphdeco-inria/gaussian-splatting](https://github.com/graphdeco-inria/gaussian-splatting)
 - Programming Massively Parallel Processors, 5th ed. (Radix Sort)
+- [NVIDIA CCCL (CUB)](https://github.com/nvidia/cccl)

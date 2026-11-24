@@ -33,6 +33,7 @@ struct RadixSort {
     wgpu::Buffer radixBlockOffsetsBuffer;
     wgpu::Buffer radixLocalRanksBuffer;
     std::array<wgpu::Buffer, 2> radixKeysBuffer;
+    std::array<wgpu::Buffer, 2> radixValuesBuffer;
 
     uint32_t radixGroupCount;
     uint32_t radixBlockCount;
@@ -41,10 +42,7 @@ struct RadixSort {
     void init(const wgpu::Device& device, const wgpu::ShaderModule& shader);
     void createPipelines(const wgpu::ShaderModule& shader);
     void createBuffers(uint32_t size);
-    void createBindGroups(
-        const wgpu::Buffer& gaussianBuffer,
-        const wgpu::Buffer& cameraBuffer,
-        const wgpu::Buffer& orderBuffer
-    );
+    const wgpu::Buffer& sortedIdsBuffer() const { return radixValuesBuffer[radixPassCount % radixValuesBuffer.size()]; }
+    void createBindGroups(const wgpu::Buffer& gaussianBuffer, const wgpu::Buffer& cameraBuffer);
     void recordCommands(const wgpu::CommandEncoder& encoder, const wgpu::PassTimestampWrites* timestamps = nullptr) const;
 };

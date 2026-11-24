@@ -27,7 +27,6 @@ struct GaussianSplattingApp : App {
 
     wgpu::Buffer gaussianBuffer;
     wgpu::Buffer cameraBuffer;
-    wgpu::Buffer orderBuffer;
 
     uint32_t gaussianCount;
     int assetIndex = 0;
@@ -122,12 +121,6 @@ void GaussianSplattingApp::createBuffers() {
     gaussianBuffer = device.CreateBuffer(&gaussianBufferDesc);
     queue.WriteBuffer(gaussianBuffer, 0, gaussians.data(), gaussianBufferDesc.size);
 
-    wgpu::BufferDescriptor orderBufferDesc {
-        .usage = wgpu::BufferUsage::Storage,
-        .size = gaussianCount * sizeof(uint32_t),
-    };
-    orderBuffer = device.CreateBuffer(&orderBufferDesc);
-
     wgpu::BufferDescriptor cameraBufferDesc {
         .usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
         .size = 2 * sizeof(Eigen::Matrix4f) + sizeof(Eigen::Vector4f),
@@ -138,6 +131,7 @@ void GaussianSplattingApp::createBuffers() {
 }
 
 void GaussianSplattingApp::createBindGroups() {
+    const auto& sortedIds = radixSort.sortedIdsBuffer();
     wgpu::BindGroupEntry entries[] {
         {
             .binding = 0,
@@ -151,8 +145,8 @@ void GaussianSplattingApp::createBindGroups() {
         },
         {
             .binding = 2,
-            .buffer = orderBuffer,
-            .size = orderBuffer.GetSize(),
+            .buffer = sortedIds,
+            .size = sortedIds.GetSize(),
         },
     };
 
@@ -162,7 +156,7 @@ void GaussianSplattingApp::createBindGroups() {
         .entries = entries,
     };
     renderBindGroup = device.CreateBindGroup(&bindGroupDesc);
-    radixSort.createBindGroups(gaussianBuffer, cameraBuffer, orderBuffer);
+    radixSort.createBindGroups(gaussianBuffer, cameraBuffer);
 }
 
 void GaussianSplattingApp::updateCameraBuffer() {

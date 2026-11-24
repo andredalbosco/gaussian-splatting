@@ -1,14 +1,15 @@
 @group(0) @binding(0) var<storage, read> gaussians: array<Gaussian>;
 @group(0) @binding(1) var<uniform> camera: Camera;
-@group(0) @binding(2) var<storage, read> order: array<u32>;
+@group(0) @binding(2) var<storage, read> sorted_ids: array<u32>;
 
 @group(1) @binding(0) var<uniform> radix_params: RadixParams;
-@group(1) @binding(1) var<storage, read> radix_input: array<vec2u>;
-@group(1) @binding(2) var<storage, read_write> radix_output: array<vec2u>;
+@group(1) @binding(1) var<storage, read> radix_keys_in: array<u32>;
+@group(1) @binding(2) var<storage, read_write> radix_keys_out: array<u32>;
 @group(1) @binding(3) var<storage, read_write> radix_histogram: array<u32>;
 @group(1) @binding(4) var<storage, read_write> radix_block_offsets: array<u32>;
 @group(1) @binding(5) var<storage, read_write> radix_local_ranks: array<u32>;
-@group(1) @binding(6) var<storage, read_write> radix_order: array<u32>;
+@group(1) @binding(6) var<storage, read> radix_values_in: array<u32>;
+@group(1) @binding(7) var<storage, read_write> radix_values_out: array<u32>;
 
 const quad_corners = array(vec2f(-1, -1), vec2f(1, -1), vec2f(-1, 1), vec2f(1, 1));
 const culled_position = vec4f(2, 2, 0, 1);
@@ -105,7 +106,7 @@ fn evaluate_sh(sh: SHCoefficients, direction: vec3f) -> vec3f {
 fn vs_main(input: VSInput) -> VSOutput {
     var output: VSOutput;
 
-    let index = order[input.instance_index];
+    let index = sorted_ids[input.instance_index];
     let gaussian = gaussians[index];
     let clip_pos = camera.view_projection * vec4f(gaussian.position.xyz, 1);
     let view_pos = (camera.view * vec4f(gaussian.position.xyz, 1)).xyz;
@@ -156,23 +157,23 @@ fn fs_main(input: VSOutput) -> @location(0) vec4f {
     return vec4f(input.color.rgb * alpha, alpha);
 }
 
-fn prefix_sum(value: u32, lane: u32) -> vec2u {
-    scan_values[lane] = value;
+fn prefix_sum(value: u32, tid: u32) -> vec2u {
+    scan_values[tid] = value;
     workgroupBarrier();
 
     for (var step = 1u; step < 256u; step *= 2u) {
         var add = 0u;
 
-        if (lane >= step) {
-            add = scan_values[lane - step];
+        if (tid >= step) {
+            add = scan_values[tid - step];
         }
         workgroupBarrier();
 
-        scan_values[lane] += add;
+        scan_values[tid] += add;
         workgroupBarrier();
     }
 
-    return vec2u(scan_values[lane] - value, scan_values[255]);
+    return vec2u(scan_values[tid] - value, scan_values[255]);
 }
 
 fn depth_key(depth: f32) -> u32 {
@@ -183,74 +184,76 @@ fn depth_key(depth: f32) -> u32 {
 
 @compute @workgroup_size(256)
 fn radix_histogram_rank(
-    @builtin(local_invocation_index) lane: u32,
-    @builtin(workgroup_id) group: vec3u
+    @builtin(global_invocation_id) gid: vec3u,
+    @builtin(local_invocation_index) tid: u32,
+    @builtin(workgroup_id) group: vec3u,
 ) {
-    if (lane < 128u) {
-        atomicStore(&digit_masks[lane], 0u);
+    if (tid < 128u) {
+        atomicStore(&digit_masks[tid], 0u);
     }
     workgroupBarrier();
 
-    let index = group.x * 256u + lane;
-    var digit = 0u;
-    let word = lane / 32u;
-    let bit = lane % 32u;
+    let word = tid / 32u;
+    let lane = tid % 32u;
 
-    if (index < radix_params.count) {
+    var digit = 0u;
+
+    if (gid.x < radix_params.count) {
         var key: u32;
 
         if (radix_params.bit_shift == 0u) {
             let direction = vec3f(camera.view[0].z, camera.view[1].z, camera.view[2].z);
-            key = depth_key(dot(direction, gaussians[index].position.xyz));
-            radix_output[index] = vec2u(key, index);
+            key = depth_key(dot(direction, gaussians[gid.x].position.xyz));
+            radix_keys_out[gid.x] = key;
+            radix_values_out[gid.x] = gid.x;
         } else {
-            key = radix_input[index].x;
+            key = radix_keys_in[gid.x];
         }
 
         digit = (key >> radix_params.bit_shift) & 15u;
-        atomicOr(&digit_masks[digit * 8u + word], 1u << bit);
+        atomicOr(&digit_masks[digit * 8u + word], 1u << lane);
     }
     workgroupBarrier();
 
-    if (index < radix_params.count) {
-        var rank = countOneBits(atomicLoad(&digit_masks[digit * 8u + word]) & ((1u << bit) - 1u));
+    if (gid.x < radix_params.count) {
+        var rank = countOneBits(atomicLoad(&digit_masks[digit * 8u + word]) & ((1u << lane) - 1u));
         for (var w = 0u; w < word; w++) {
             rank += countOneBits(atomicLoad(&digit_masks[digit * 8u + w]));
         }
 
-        radix_local_ranks[index] = rank;
+        radix_local_ranks[gid.x] = rank;
     }
 
-    if (lane < 16u) {
+    if (tid < 16u) {
         var count = 0u;
         for (var w = 0u; w < 8u; w++) {
-            count += countOneBits(atomicLoad(&digit_masks[lane * 8u + w]));
+            count += countOneBits(atomicLoad(&digit_masks[tid * 8u + w]));
         }
 
-        radix_histogram[lane * radix_params.group_count + group.x] = count;
+        radix_histogram[tid * radix_params.group_count + group.x] = count;
     }
 }
 
 @compute @workgroup_size(256)
 fn radix_scan_blocks(
-    @builtin(local_invocation_index) lane: u32,
+    @builtin(local_invocation_index) tid: u32,
     @builtin(workgroup_id) group: vec3u
 ) {
-    let index = group.x * 256u + lane;
+    let gid = group.x * 256u + tid;
     let digit = group.y;
 
     var value = 0u;
-    if (index < radix_params.group_count) {
-        value = radix_histogram[digit * radix_params.group_count + index];
+    if (gid < radix_params.group_count) {
+        value = radix_histogram[digit * radix_params.group_count + gid];
     }
 
-    let result = prefix_sum(value, lane);
+    let result = prefix_sum(value, tid);
 
-    if (index < radix_params.group_count) {
-        radix_histogram[digit * radix_params.group_count + index] = result.x;
+    if (gid < radix_params.group_count) {
+        radix_histogram[digit * radix_params.group_count + gid] = result.x;
     }
 
-    if (lane == 0u) {
+    if (tid == 0u) {
         radix_block_offsets[digit * radix_params.block_count + group.x] = result.y;
     }
 }
@@ -285,17 +288,15 @@ fn radix_scatter(@builtin(global_invocation_id) gid: vec3u) {
         return;
     }
 
-    let key_index = radix_input[gid.x];
-    let digit = (key_index.x >> radix_params.bit_shift) & 15u;
+    let key = radix_keys_in[gid.x];
+    let digit = (key >> radix_params.bit_shift) & 15u;
 
     let group = gid.x / 256u;
 
     let base = radix_block_offsets[digit * radix_params.block_count + group / 256u];
     let offset = radix_histogram[digit * radix_params.group_count + group] + radix_local_ranks[gid.x];
+    let dst = base + offset;
 
-    if (radix_params.bit_shift == 28u) {
-        radix_order[base + offset] = key_index.y;
-    } else {
-        radix_output[base + offset] = key_index;
-    }
+    radix_keys_out[dst] = key;
+    radix_values_out[dst] = radix_values_in[gid.x];
 }

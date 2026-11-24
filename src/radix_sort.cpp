@@ -1,7 +1,6 @@
 #include "radix_sort.hpp"
 
 #include <algorithm>
-#include <utility>
 
 struct RadixParams {
     uint32_t count;
@@ -47,12 +46,14 @@ void RadixSort::createBuffers(uint32_t size) {
     radixGroupCount = (count + radixWorkgroupSize - 1) / radixWorkgroupSize;
     radixBlockCount = (radixGroupCount + radixWorkgroupSize - 1) / radixWorkgroupSize;
 
-    wgpu::BufferDescriptor keysBufferDesc {
+    wgpu::BufferDescriptor sortBufferDesc {
         .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc,
-        .size = std::max<uint64_t>(16, uint64_t(count) * 2 * sizeof(uint32_t)),
+        .size = std::max<uint64_t>(16, uint64_t(count) * sizeof(uint32_t)),
     };
-    radixKeysBuffer[0] = device.CreateBuffer(&keysBufferDesc);
-    radixKeysBuffer[1] = device.CreateBuffer(&keysBufferDesc);
+    for (size_t i = 0; i < radixKeysBuffer.size(); i++) {
+        radixKeysBuffer[i] = device.CreateBuffer(&sortBufferDesc);
+        radixValuesBuffer[i] = device.CreateBuffer(&sortBufferDesc);
+    }
 
     wgpu::BufferDescriptor localRanksBufferDesc {
         .usage = wgpu::BufferUsage::Storage,
@@ -89,11 +90,7 @@ void RadixSort::createBuffers(uint32_t size) {
     }
 }
 
-void RadixSort::createBindGroups(
-    const wgpu::Buffer& gaussianBuffer,
-    const wgpu::Buffer& cameraBuffer,
-    const wgpu::Buffer& orderBuffer
-) {
+void RadixSort::createBindGroups(const wgpu::Buffer& gaussianBuffer, const wgpu::Buffer& cameraBuffer) {
     wgpu::BindGroupEntry histogramInputEntries[] {
         {.binding = 0, .buffer = gaussianBuffer, .size = gaussianBuffer.GetSize()},
         {.binding = 1, .buffer = cameraBuffer, .size = cameraBuffer.GetSize()},
@@ -120,15 +117,13 @@ void RadixSort::createBindGroups(
     };
     radixScatterBindGroup = device.CreateBindGroup(&scatterBindGroupDesc);
 
-    wgpu::Buffer sourceBuffer = radixKeysBuffer[0];
-    wgpu::Buffer destinationBuffer = radixKeysBuffer[1];
     for (uint32_t passIndex = 0; passIndex < radixPassCount; passIndex++) {
-        wgpu::Buffer histogramInputBuffer = sourceBuffer;
-        wgpu::Buffer histogramOutputBuffer = destinationBuffer;
-        if (passIndex == 0) {
-            histogramInputBuffer = destinationBuffer;
-            histogramOutputBuffer = sourceBuffer;
-        }
+        const uint32_t src = passIndex % 2;
+        const uint32_t dst = 1 - src;
+        const uint32_t histogramDst = passIndex == 0 ? src : dst;
+        const auto& histogramInputKeys = radixKeysBuffer[1 - histogramDst];
+        const auto& histogramOutputKeys = radixKeysBuffer[histogramDst];
+        const auto& histogramOutputValues = radixValuesBuffer[histogramDst];
 
         wgpu::BindGroupEntry paramsEntry {
             .binding = 0,
@@ -139,14 +134,15 @@ void RadixSort::createBindGroups(
 
         wgpu::BindGroupEntry histogramEntries[] {
             paramsEntry,
-            {.binding = 1, .buffer = histogramInputBuffer, .size = histogramInputBuffer.GetSize()},
-            {.binding = 2, .buffer = histogramOutputBuffer, .size = histogramOutputBuffer.GetSize()},
+            {.binding = 1, .buffer = histogramInputKeys, .size = histogramInputKeys.GetSize()},
+            {.binding = 2, .buffer = histogramOutputKeys, .size = histogramOutputKeys.GetSize()},
             {.binding = 3, .buffer = radixHistogramBuffer, .size = radixHistogramBuffer.GetSize()},
             {.binding = 5, .buffer = radixLocalRanksBuffer, .size = radixLocalRanksBuffer.GetSize()},
+            {.binding = 7, .buffer = histogramOutputValues, .size = histogramOutputValues.GetSize()},
         };
         wgpu::BindGroupDescriptor histogramDesc {
             .layout = radixHistogramRankPipeline.GetBindGroupLayout(1),
-            .entryCount = 5,
+            .entryCount = 6,
             .entries = histogramEntries,
         };
         radixHistogramBindGroups[passIndex] = device.CreateBindGroup(&histogramDesc);
@@ -174,23 +170,26 @@ void RadixSort::createBindGroups(
         };
         radixScanSumsBindGroups[passIndex] = device.CreateBindGroup(&scanSumsDesc);
 
+        const auto& inputKeys = radixKeysBuffer[src];
+        const auto& outputKeys = radixKeysBuffer[dst];
+        const auto& inputValues = radixValuesBuffer[src];
+        const auto& outputValues = radixValuesBuffer[dst];
         wgpu::BindGroupEntry scatterEntries[] {
             paramsEntry,
-            {.binding = 1, .buffer = sourceBuffer, .size = sourceBuffer.GetSize()},
-            {.binding = 2, .buffer = destinationBuffer, .size = destinationBuffer.GetSize()},
+            {.binding = 1, .buffer = inputKeys, .size = inputKeys.GetSize()},
+            {.binding = 2, .buffer = outputKeys, .size = outputKeys.GetSize()},
             {.binding = 3, .buffer = radixHistogramBuffer, .size = radixHistogramBuffer.GetSize()},
             {.binding = 4, .buffer = radixBlockOffsetsBuffer, .size = radixBlockOffsetsBuffer.GetSize()},
             {.binding = 5, .buffer = radixLocalRanksBuffer, .size = radixLocalRanksBuffer.GetSize()},
-            {.binding = 6, .buffer = orderBuffer, .size = orderBuffer.GetSize()},
+            {.binding = 6, .buffer = inputValues, .size = inputValues.GetSize()},
+            {.binding = 7, .buffer = outputValues, .size = outputValues.GetSize()},
         };
         wgpu::BindGroupDescriptor scatterDesc {
             .layout = radixScatterPipeline.GetBindGroupLayout(1),
-            .entryCount = 7,
+            .entryCount = 8,
             .entries = scatterEntries,
         };
         radixScatterBindGroups[passIndex] = device.CreateBindGroup(&scatterDesc);
-
-        std::swap(sourceBuffer, destinationBuffer);
     }
 }
 
