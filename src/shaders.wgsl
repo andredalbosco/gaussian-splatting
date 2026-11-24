@@ -145,22 +145,29 @@ fn vs_main(input: VSInput) -> VSOutput {
 @fragment
 fn fs_main(input: VSOutput) -> @location(0) vec4f {
     let p = input.offset;
-    let q = input.conic.x * p.x * p.x + 2.0 * input.conic.y * p.x * p.y + input.conic.z * p.y * p.y;
-    if (q > gaussian_extent * gaussian_extent) { discard; }
-    let alpha = min(0.99, input.color.a * exp(-0.5 * q));
+    let q = input.conic;
+
+    let r = q.x * p.x * p.x + 2.0 * q.y * p.x * p.y + q.z * p.y * p.y;
+    if (r > gaussian_extent * gaussian_extent) { discard; }
+
+    let alpha = min(0.99, input.color.a * exp(-0.5 * r));
     if (alpha < 1.0 / 255.0) { discard; }
+
     return vec4f(input.color.rgb * alpha, alpha);
 }
 
 fn prefix_sum(value: u32, lane: u32) -> vec2u {
     scan_values[lane] = value;
     workgroupBarrier();
+
     for (var step = 1u; step < 256u; step *= 2u) {
         var add = 0u;
+
         if (lane >= step) {
             add = scan_values[lane - step];
         }
         workgroupBarrier();
+
         scan_values[lane] += add;
         workgroupBarrier();
     }
@@ -175,14 +182,19 @@ fn depth_key(depth: f32) -> u32 {
 
 @compute @workgroup_size(256)
 fn radix_histogram_rank(@builtin(local_invocation_index) lane: u32, @builtin(workgroup_id) group: vec3u) {
-    if (lane < 128u) { atomicStore(&digit_masks[lane], 0u); }
+    if (lane < 128u) {
+        atomicStore(&digit_masks[lane], 0u);
+    }
     workgroupBarrier();
+
     let index = group.x * 256u + lane;
     var digit = 0u;
     let word = lane / 32u;
     let bit = lane % 32u;
+
     if (index < radix_params.count) {
         var key: u32;
+
         if (radix_params.bit_shift == 0u) {
             let direction = vec3f(camera.view[0].z, camera.view[1].z, camera.view[2].z);
             key = depth_key(dot(direction, gaussians[index].position.xyz));
@@ -190,22 +202,27 @@ fn radix_histogram_rank(@builtin(local_invocation_index) lane: u32, @builtin(wor
         } else {
             key = radix_input[index].x;
         }
+
         digit = (key >> radix_params.bit_shift) & 15u;
         atomicOr(&digit_masks[digit * 8u + word], 1u << bit);
     }
     workgroupBarrier();
+
     if (index < radix_params.count) {
         var rank = countOneBits(atomicLoad(&digit_masks[digit * 8u + word]) & ((1u << bit) - 1u));
         for (var w = 0u; w < word; w++) {
             rank += countOneBits(atomicLoad(&digit_masks[digit * 8u + w]));
         }
+
         radix_local_ranks[index] = rank;
     }
+
     if (lane < 16u) {
         var count = 0u;
         for (var w = 0u; w < 8u; w++) {
             count += countOneBits(atomicLoad(&digit_masks[lane * 8u + w]));
         }
+
         radix_histogram[lane * radix_params.group_count + group.x] = count;
     }
 }
@@ -220,33 +237,45 @@ fn radix_scan_blocks(@builtin(local_invocation_index) lane: u32, @builtin(workgr
     if (index < radix_params.group_count) { radix_histogram[digit * radix_params.group_count + index] = result.x; }
     if (lane == 0u) { radix_block_offsets[digit * radix_params.block_count + group.x] = result.y; }
 }
+
 @compute @workgroup_size(16)
 fn radix_scan_sums(@builtin(local_invocation_index) digit: u32) {
     var total = 0u;
     for (var block = 0u; block < radix_params.block_count; block++) {
         total += radix_block_offsets[digit * radix_params.block_count + block];
     }
+
     digit_totals[digit] = total;
     workgroupBarrier();
+
     var offset = 0u;
-    for (var previous_digit = 0u; previous_digit < digit; previous_digit++) { offset += digit_totals[previous_digit]; }
+    for (var previous_digit = 0u; previous_digit < digit; previous_digit++) {
+        offset += digit_totals[previous_digit];
+    }
+
     for (var block = 0u; block < radix_params.block_count; block++) {
         let index = digit * radix_params.block_count + block;
         let count = radix_block_offsets[index];
+
         radix_block_offsets[index] = offset;
         offset += count;
     }
 }
 
 @compute @workgroup_size(256)
-fn radix_scatter(@builtin(global_invocation_id) id: vec3u) {
-    let index = id.x;
-    if (index >= radix_params.count) { return; }
-    let key_index = radix_input[index];
+fn radix_scatter(@builtin(global_invocation_id) gid: vec3u) {
+    if (gid.x >= radix_params.count) {
+        return;
+    }
+
+    let key_index = radix_input[gid.x];
     let digit = (key_index.x >> radix_params.bit_shift) & 15u;
-    let group = index / 256u;
+
+    let group = gid.x / 256u;
+
     let base = radix_block_offsets[digit * radix_params.block_count + group / 256u];
-    let offset = radix_histogram[digit * radix_params.group_count + group] + radix_local_ranks[index];
+    let offset = radix_histogram[digit * radix_params.group_count + group] + radix_local_ranks[gid.x];
+
     if (radix_params.bit_shift == 28u) {
         radix_order[base + offset] = key_index.y;
     } else {
